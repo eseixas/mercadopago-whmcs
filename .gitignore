@@ -1,0 +1,26 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.suo
+*.user
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Composer
+vendor/
+composer.lock
+
+# Logs
+*.log
+
+# Environment / Secrets (NEVER commit tokens!)
+.env
+.env.local
+config.local.php
+
+# Backup files
+*.bak
+*.orig
