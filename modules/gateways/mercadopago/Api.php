@@ -6,12 +6,13 @@
  *
  * Handles all HTTP communication with the Mercado Pago REST API.
  *
- * @author      Your Name
+ * @author      Eduardo Seixas
  * @copyright   2026
- * @license     MIT
+ * @license     GPL-3.0
  */
 
-declare(strict_types=1);
+declare(strict_types = 1)
+;
 
 namespace WHMCS\Module\Gateway\MercadoPago;
 
@@ -20,7 +21,7 @@ class Api
     private const BASE_URL = 'https://api.mercadopago.com';
 
     private string $accessToken;
-    private array  $lastError = [];
+    private array $lastError = [];
 
     public function __construct(string $accessToken)
     {
@@ -72,8 +73,8 @@ class Api
     {
         $query = http_build_query([
             'external_reference' => $externalReference,
-            'sort'               => 'date_created',
-            'criteria'           => 'desc',
+            'sort' => 'date_created',
+            'criteria' => 'desc',
         ]);
         return $this->get("/v1/payments/search?{$query}");
     }
@@ -147,10 +148,10 @@ class Api
 
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL            => $url,
-            CURLOPT_HTTPHEADER     => $headers,
+            CURLOPT_URL => $url,
+            CURLOPT_HTTPHEADER => $headers,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT => 30,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
         ]);
@@ -158,15 +159,16 @@ class Api
         if ($method === 'POST') {
             curl_setopt($ch, CURLOPT_POST, true);
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        } elseif ($method !== 'GET') {
+        }
+        elseif ($method !== 'GET') {
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
             if (!empty($data)) {
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
             }
         }
 
-        $response  = curl_exec($ch);
-        $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlError = curl_error($ch);
         curl_close($ch);
 
@@ -190,13 +192,13 @@ class Api
             $data,
             $response,
             $decoded ?? [],
-            [$this->accessToken]  // masks the token in logs
+        [$this->accessToken] // masks the token in logs
         );
 
         if ($httpCode >= 400) {
             $this->lastError = [
                 'http_code' => $httpCode,
-                'response'  => $decoded,
+                'response' => $decoded,
             ];
             return null;
         }
@@ -210,7 +212,7 @@ class Api
      */
     private function idempotencyKey(string $endpoint, array $data): string
     {
-        return hash('sha256', $endpoint . json_encode($data) . (string) time());
+        return hash('sha256', $endpoint . json_encode($data) . (string)time());
     }
 
     /**

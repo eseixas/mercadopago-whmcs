@@ -8,9 +8,9 @@
  *
  * Compatible with: WHMCS 9.x | PHP 8.3 | Mercado Pago API v1
  *
- * @author      Your Name
+ * @author      Eduardo Seixas
  * @copyright   2026
- * @license     MIT
+ * @license     GPL-3.0
  */
 
 declare(strict_types=1);

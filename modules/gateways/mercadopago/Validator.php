@@ -4,9 +4,9 @@
  * Mercado Pago - WHMCS Gateway Module
  * CPF / CNPJ Validator
  *
- * @author      Your Name
+ * @author      Eduardo Seixas
  * @copyright   2026
- * @license     MIT
+ * @license     GPL-3.0
  */
 
 declare(strict_types=1);
