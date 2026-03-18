@@ -152,7 +152,45 @@ $currency      = $payment['currency_id'] ?? '';
 $fee           = (float) ($payment['fee_details'][0]['amount'] ?? 0);
 
 // ---------------------------------------------------------------------------
-// Register the payment in WHMCS (idempotent – WHMCS checks for duplicate transids)
+// Guard: check for duplicate transaction (Mercado Pago sends multiple webhooks)
+// ---------------------------------------------------------------------------
+// IMPORTANT: WHMCS AddInvoicePayment does NOT check for duplicate transids.
+// We must check manually to avoid processing the same payment multiple times.
+
+try {
+    $existingTransaction = \WHMCS\Database\Capsule::table('tblaccounts')
+        ->where('transid', $transactionId)
+        ->where('gateway', $gatewayModuleName)
+        ->first();
+
+    if ($existingTransaction) {
+        logModuleCall(
+            $gatewayModuleName,
+            'webhook_duplicate_skipped',
+            [
+                'transaction_id' => $transactionId,
+                'invoice_id'     => $invoiceId,
+            ],
+            'Transaction already recorded – skipping duplicate webhook.',
+            null
+        );
+        http_response_code(200);
+        echo 'Duplicate – already recorded';
+        exit;
+    }
+} catch (\Throwable $e) {
+    // If we can't check, log and continue cautiously
+    logModuleCall(
+        $gatewayModuleName,
+        'webhook_duplicate_check_error',
+        $transactionId,
+        $e->getMessage(),
+        null
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Register the payment in WHMCS
 // ---------------------------------------------------------------------------
 
 $addPaymentResult = localAPI('AddInvoicePayment', [

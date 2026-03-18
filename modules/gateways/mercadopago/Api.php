@@ -212,7 +212,7 @@ class Api
      */
     private function idempotencyKey(string $endpoint, array $data): string
     {
-        return hash('sha256', $endpoint . json_encode($data) . (string)time());
+        return hash('sha256', $endpoint . json_encode($data));
     }
 
     /**
