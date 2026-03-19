@@ -6,7 +6,7 @@
 [![PHP](https://img.shields.io/badge/PHP-8.3-777BB4?style=flat-square&logo=php)](https://www.php.net)
 [![API](https://img.shields.io/badge/Mercado%20Pago-API%20v1-009ee3?style=flat-square)](https://www.mercadopago.com.br/developers)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.0.0-orange?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.0.1-orange?style=flat-square)](CHANGELOG.md)
 
 Integração completa com o **Mercado Pago** para WHMCS 9.x via API — com suporte a PIX, Boleto, Cartão de Crédito e Débito, confirmação automática de pagamentos e muito mais.
 
@@ -159,7 +159,7 @@ Essas informações são injetadas nas variáveis do PDF (`InvoicePdfVars`) e no
 - O Access Token é **mascarado** em todos os registros de log do WHMCS.
 - A comunicação usa exclusivamente **HTTPS** com verificação SSL ativada.
 - O webhook **verifica o pagamento diretamente na API** do MP antes de registrar — não confia apenas no payload recebido.
-- As transações são idempotentes: o WHMCS ignora pagamentos já registrados.
+- Proteção contra webhooks duplicados: verifica `tblaccounts` antes de registrar pagamentos para evitar cobranças duplicadas.
 
 ---
 
