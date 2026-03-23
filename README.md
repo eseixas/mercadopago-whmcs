@@ -6,7 +6,7 @@
 [![PHP](https://img.shields.io/badge/PHP-8.3-777BB4?style=flat-square&logo=php)](https://www.php.net)
 [![API](https://img.shields.io/badge/Mercado%20Pago-API%20v1-009ee3?style=flat-square)](https://www.mercadopago.com.br/developers)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.0.1-orange?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.0.2-orange?style=flat-square)](CHANGELOG.md)
 
 Integração completa com o **Mercado Pago** para WHMCS 9.x via API — com suporte a PIX, Boleto, Cartão de Crédito e Débito, confirmação automática de pagamentos e muito mais.
 

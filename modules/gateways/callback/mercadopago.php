@@ -152,12 +152,34 @@ $currency      = $payment['currency_id'] ?? '';
 $fee           = (float) ($payment['fee_details'][0]['amount'] ?? 0);
 
 // ---------------------------------------------------------------------------
-// Guard: check for duplicate transaction (Mercado Pago sends multiple webhooks)
+// Guard: Acquire exclusive lock to prevent race conditions
 // ---------------------------------------------------------------------------
-// IMPORTANT: WHMCS AddInvoicePayment does NOT check for duplicate transids.
-// We must check manually to avoid processing the same payment multiple times.
+// Mercado Pago sends multiple webhooks nearly simultaneously for the same
+// payment. A simple check-then-insert has a TOCTOU race condition: both
+// requests can see "no existing transaction" before either inserts.
+// We solve this with an exclusive file lock per transaction ID.
+
+$lockDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'whmcs_mp_locks';
+if (!is_dir($lockDir)) {
+    @mkdir($lockDir, 0700, true);
+}
+
+$lockFile = $lockDir . DIRECTORY_SEPARATOR . 'mp_txn_' . preg_replace('/[^a-zA-Z0-9_-]/', '', $transactionId) . '.lock';
+$lockHandle = fopen($lockFile, 'c');
+
+if (!$lockHandle || !flock($lockHandle, LOCK_EX)) {
+    logModuleCall($gatewayModuleName, 'webhook_lock_failed', $transactionId, 'Could not acquire lock', null);
+    http_response_code(200);
+    echo 'Lock failed – will retry';
+    exit;
+}
+
+// ---------------------------------------------------------------------------
+// Inside the lock: check for duplicate transaction, then register payment
+// ---------------------------------------------------------------------------
 
 try {
+    // Re-check for existing transaction INSIDE the lock (critical for atomicity)
     $existingTransaction = \WHMCS\Database\Capsule::table('tblaccounts')
         ->where('transid', $transactionId)
         ->where('gateway', $gatewayModuleName)
@@ -178,46 +200,62 @@ try {
         echo 'Duplicate – already recorded';
         exit;
     }
-} catch (\Throwable $e) {
-    // If we can't check, log and continue cautiously
+
+    // Also check if the invoice is already paid (belt and suspenders)
+    if ($invoiceResult['status'] === 'Paid') {
+        logModuleCall(
+            $gatewayModuleName,
+            'webhook_invoice_already_paid',
+            [
+                'transaction_id' => $transactionId,
+                'invoice_id'     => $invoiceId,
+                'invoice_status' => $invoiceResult['status'],
+            ],
+            'Invoice already marked as Paid – skipping to avoid credit.',
+            null
+        );
+        http_response_code(200);
+        echo 'Invoice already paid – skipped';
+        exit;
+    }
+
+    // -----------------------------------------------------------------------
+    // Register the payment in WHMCS
+    // -----------------------------------------------------------------------
+
+    $addPaymentResult = localAPI('AddInvoicePayment', [
+        'invoiceid'  => $invoiceId,
+        'transid'    => $transactionId,
+        'gateway'    => $gatewayModuleName,
+        'date'       => date('Ymd'),
+        'amount'     => $amountPaid,
+        'fees'       => $fee,
+        'noemail'    => false, // send payment confirmation email
+    ]);
+
     logModuleCall(
         $gatewayModuleName,
-        'webhook_duplicate_check_error',
-        $transactionId,
-        $e->getMessage(),
-        null
+        'webhook_add_payment',
+        [
+            'invoice_id'    => $invoiceId,
+            'transaction_id'=> $transactionId,
+            'amount'        => $amountPaid,
+            'fee'           => $fee,
+            'mp_status'     => $paymentStatus,
+        ],
+        $addPaymentResult,
+        null,
+        [$accessToken]
     );
+
+    http_response_code(200);
+    echo $addPaymentResult['result'] === 'success' ? 'Payment recorded' : 'Already recorded or error';
+
+} finally {
+    // Always release the lock
+    flock($lockHandle, LOCK_UN);
+    fclose($lockHandle);
+    @unlink($lockFile); // cleanup lock file
 }
 
-// ---------------------------------------------------------------------------
-// Register the payment in WHMCS
-// ---------------------------------------------------------------------------
-
-$addPaymentResult = localAPI('AddInvoicePayment', [
-    'invoiceid'  => $invoiceId,
-    'transid'    => $transactionId,
-    'gateway'    => $gatewayModuleName,
-    'date'       => date('Ymd'),
-    'amount'     => $amountPaid,
-    'fees'       => $fee,
-    'noemail'    => false, // send payment confirmation email
-]);
-
-logModuleCall(
-    $gatewayModuleName,
-    'webhook_add_payment',
-    [
-        'invoice_id'    => $invoiceId,
-        'transaction_id'=> $transactionId,
-        'amount'        => $amountPaid,
-        'fee'           => $fee,
-        'mp_status'     => $paymentStatus,
-    ],
-    $addPaymentResult,
-    null,
-    [$accessToken]
-);
-
-http_response_code(200);
-echo $addPaymentResult['result'] === 'success' ? 'Payment recorded' : 'Already recorded or error';
 exit;
