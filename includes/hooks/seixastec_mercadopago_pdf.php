@@ -5,7 +5,7 @@
  *
  * Injeta informações de PIX e Boleto Bancário no PDF da fatura e no e-mail
  * enviado ao cliente. Coloque este arquivo em:
- *   includes/hooks/mercadopago_pdf.php
+ *   includes/hooks/seixastec_mercadopago_pdf.php
  *
  * Compatible with: WHMCS 9.x | PHP 8.3
  *
@@ -16,7 +16,7 @@
 
 declare(strict_types=1);
 
-use WHMCS\Module\Gateway\MercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
 
 if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
@@ -37,18 +37,18 @@ add_hook('InvoicePdfVars', 1, function (array $vars): array {
     if ($invoice['result'] !== 'success') {
         return $vars;
     }
-    if (strtolower($invoice['paymentmethod']) !== 'mercadopago') {
+    if (strtolower($invoice['paymentmethod']) !== 'seixastec_mercadopago') {
         return $vars;
     }
 
-    $gatewayParams = getGatewayVariables('mercadopago');
+    $gatewayParams = getGatewayVariables('seixastec_mercadopago');
     $sandboxMode   = $gatewayParams['sandboxMode'] === 'on';
     $accessToken   = $sandboxMode
         ? $gatewayParams['sandboxAccessToken']
         : $gatewayParams['accessToken'];
 
     // Search for a payment by external reference (invoice id)
-    require_once __DIR__ . '/../../modules/gateways/mercadopago/Api.php';
+    require_once __DIR__ . '/../../modules/gateways/seixastec_mercadopago/Api.php';
     $api    = new Api($accessToken);
     $search = $api->searchPaymentByReference((string) $invoiceId);
 
@@ -79,10 +79,10 @@ add_hook('InvoicePdfVars', 1, function (array $vars): array {
     }
 
     // Inject into $vars so the invoice template can use them
-    $vars['mercadopago_pix_qrcode']    = $pixQrCode;      // base64 image
-    $vars['mercadopago_pix_copypaste'] = $pixCopyPaste;   // text string
-    $vars['mercadopago_boleto_url']    = $boletoUrl;       // full PDF URL
-    $vars['mercadopago_boleto_codigo'] = $boletoBarcode;   // barcode
+    $vars['seixastec_mercadopago_pix_qrcode']    = $pixQrCode;      // base64 image
+    $vars['seixastec_mercadopago_pix_copypaste'] = $pixCopyPaste;   // text string
+    $vars['seixastec_mercadopago_boleto_url']    = $boletoUrl;       // full PDF URL
+    $vars['seixastec_mercadopago_boleto_codigo'] = $boletoBarcode;   // barcode
 
     return $vars;
 });
@@ -103,17 +103,17 @@ add_hook('EmailPreSend', 1, function (array $vars): ?array {
     }
 
     $invoice = localAPI('GetInvoice', ['invoiceid' => $invoiceId]);
-    if ($invoice['result'] !== 'success' || strtolower($invoice['paymentmethod']) !== 'mercadopago') {
+    if ($invoice['result'] !== 'success' || strtolower($invoice['paymentmethod']) !== 'seixastec_mercadopago') {
         return null;
     }
 
-    $gatewayParams = getGatewayVariables('mercadopago');
+    $gatewayParams = getGatewayVariables('seixastec_mercadopago');
     $sandboxMode   = $gatewayParams['sandboxMode'] === 'on';
     $accessToken   = $sandboxMode
         ? $gatewayParams['sandboxAccessToken']
         : $gatewayParams['accessToken'];
 
-    require_once __DIR__ . '/../../modules/gateways/mercadopago/Api.php';
+    require_once __DIR__ . '/../../modules/gateways/seixastec_mercadopago/Api.php';
     $api    = new Api($accessToken);
     $search = $api->searchPaymentByReference((string) $invoiceId);
 

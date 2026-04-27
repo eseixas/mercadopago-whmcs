@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-04-27
+
+### Changed
+- Renomeado o módulo de `mercadopago` para `seixastec_mercadopago` para evitar conflitos de nome e refletir a marca.
+- Atualizada toda a estrutura de arquivos e diretórios: `seixastec_mercadopago.php`, diretório `seixastec_mercadopago/`, callback `seixastec_mercadopago.php` e hook `seixastec_mercadopago_pdf.php`.
+- Atualizados os nomes das funções internas (ex: `seixastec_mercadopago_link`) e o namespace para `WHMCS\Module\Gateway\SeixastecMercadoPago`.
+
 ## [1.0.2] - 2026-03-23
 
 ### Fixed

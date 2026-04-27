@@ -11,7 +11,7 @@
 
 declare(strict_types=1);
 
-namespace WHMCS\Module\Gateway\MercadoPago;
+namespace WHMCS\Module\Gateway\SeixastecMercadoPago;
 
 class Validator
 {

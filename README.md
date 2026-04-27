@@ -6,7 +6,7 @@
 [![PHP](https://img.shields.io/badge/PHP-8.3-777BB4?style=flat-square&logo=php)](https://www.php.net)
 [![API](https://img.shields.io/badge/Mercado%20Pago-API%20v1-009ee3?style=flat-square)](https://www.mercadopago.com.br/developers)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.0.2-orange?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.0.3-orange?style=flat-square)](CHANGELOG.md)
 
 Integração completa com o **Mercado Pago** para WHMCS 9.x via API — com suporte a PIX, Boleto, Cartão de Crédito e Débito, confirmação automática de pagamentos e muito mais.
 
@@ -44,15 +44,15 @@ Integração completa com o **Mercado Pago** para WHMCS 9.x via API — com supo
 whmcs-mercadopago/
 ├── modules/
 │   └── gateways/
-│       ├── mercadopago.php              ← Módulo principal (config, link, refund)
-│       ├── mercadopago/
+│       ├── seixastec_mercadopago.php              ← Módulo principal (config, link, refund)
+│       ├── seixastec_mercadopago/
 │       │   ├── Api.php                  ← Cliente HTTP para a API do Mercado Pago
 │       │   └── Validator.php            ← Validador de CPF e CNPJ
 │       └── callback/
-│           └── mercadopago.php          ← Webhook / IPN Handler
+│           └── seixastec_mercadopago.php          ← Webhook / IPN Handler
 ├── includes/
 │   └── hooks/
-│       └── mercadopago_pdf.php          ← Hook para PDF e e-mail da fatura
+│       └── seixastec_mercadopago_pdf.php          ← Hook para PDF e e-mail da fatura
 ├── .gitignore
 ├── CHANGELOG.md
 ├── LICENSE
@@ -108,7 +108,7 @@ No painel do Mercado Pago:
 Adicione a URL abaixo e marque os eventos **Payments** e **Merchant orders**:
 
 ```
-https://SEU_WHMCS_URL/modules/gateways/callback/mercadopago.php
+https://SEU_WHMCS_URL/modules/gateways/callback/seixastec_mercadopago.php
 ```
 
 ---
@@ -122,7 +122,7 @@ Clica em "Pagar agora" → aba do Mercado Pago (Checkout Pro) abre
         ↓
 Cliente escolhe PIX / Boleto / Cartão e efetua o pagamento
         ↓
-Mercado Pago envia Webhook → callback/mercadopago.php
+Mercado Pago envia Webhook → callback/seixastec_mercadopago.php
         ↓
 Módulo verifica o status "approved" via API (não confia apenas no payload)
         ↓
@@ -143,7 +143,7 @@ JS da fatura detecta o status "Pago" → exibe banner e redireciona o cliente
 
 ## 📄 PIX e Boleto no PDF / E-mail
 
-O hook `mercadopago_pdf.php` consulta a API do MP após a criação da preferência e recupera:
+O hook `seixastec_mercadopago_pdf.php` consulta a API do MP após a criação da preferência e recupera:
 
 - **PIX:** QR Code em base64 + Código Copia e Cola
 - **Boleto:** Linha digitável + link para impressão

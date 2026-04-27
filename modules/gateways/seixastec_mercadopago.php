@@ -14,21 +14,21 @@
 
 declare(strict_types=1);
 
-use WHMCS\Module\Gateway\MercadoPago\Api;
-use WHMCS\Module\Gateway\MercadoPago\Validator;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\Validator;
 
 if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
-require_once __DIR__ . '/mercadopago/Api.php';
-require_once __DIR__ . '/mercadopago/Validator.php';
+require_once __DIR__ . '/seixastec_mercadopago/Api.php';
+require_once __DIR__ . '/seixastec_mercadopago/Validator.php';
 
 // ---------------------------------------------------------------------------
 // Module metadata
 // ---------------------------------------------------------------------------
 
-function mercadopago_MetaData(): array
+function seixastec_mercadopago_MetaData(): array
 {
     return [
         'DisplayName' => 'Mercado Pago',
@@ -42,9 +42,9 @@ function mercadopago_MetaData(): array
 // Configuration fields
 // ---------------------------------------------------------------------------
 
-function mercadopago_config(): array
+function seixastec_mercadopago_config(): array
 {
-    $customFields = _mercadopago_getCustomFieldsDropdown();
+    $customFields = _seixastec_mercadopago_getCustomFieldsDropdown();
 
     return [
         'FriendlyName' => [
@@ -126,7 +126,7 @@ function mercadopago_config(): array
 // Payment link (invoice view)
 // ---------------------------------------------------------------------------
 
-function mercadopago_link(array $params): string
+function seixastec_mercadopago_link(array $params): string
 {
     // ---- Gather basic params ----
     $invoiceId      = (int) $params['invoiceid'];
@@ -151,7 +151,7 @@ function mercadopago_link(array $params): string
     // ---- CPF/CNPJ ----
     $cpfCnpj = '';
     if ($cpfCnpjFieldId > 0) {
-        $cpfCnpj = _mercadopago_getClientCustomField($clientDetails['userid'], $cpfCnpjFieldId);
+        $cpfCnpj = _seixastec_mercadopago_getClientCustomField($clientDetails['userid'], $cpfCnpjFieldId);
     }
 
     // Validate CPF/CNPJ if required
@@ -172,7 +172,7 @@ function mercadopago_link(array $params): string
     $totalAmount = round($totalAmount, 2);
 
     // ---- Build preference payload ----
-    $callbackUrl = $systemUrl . 'modules/gateways/callback/mercadopago.php';
+    $callbackUrl = $systemUrl . 'modules/gateways/callback/seixastec_mercadopago.php';
     $successUrl  = $systemUrl . 'viewinvoice.php?id=' . $invoiceId . '&paymentsuccess=true';
     $failureUrl  = $systemUrl . 'viewinvoice.php?id=' . $invoiceId . '&paymentfailed=true';
     $pendingUrl  = $systemUrl . 'viewinvoice.php?id=' . $invoiceId . '&paymentpending=true';
@@ -231,26 +231,26 @@ function mercadopago_link(array $params): string
 
     if (!$preference) {
         $error = $api->getLastError();
-        logModuleCall('mercadopago', 'createPreference', $preferenceData, 'ERROR: ' . json_encode($error), null, [$accessToken]);
+        logModuleCall('seixastec_mercadopago', 'createPreference', $preferenceData, 'ERROR: ' . json_encode($error), null, [$accessToken]);
         return '<div class="alert alert-danger">Erro ao conectar ao Mercado Pago. Tente novamente ou entre em contato com o suporte. Detalhes: ' . htmlspecialchars(json_encode($error)) . '</div>';
     }
 
     // ---- Store preference ID for webhook matching ----
-    _mercadopago_savePreference($invoiceId, $preference['id']);
+    _seixastec_mercadopago_savePreference($invoiceId, $preference['id']);
 
     $checkoutUrl = $sandboxMode
         ? ($preference['sandbox_init_point'] ?? $preference['init_point'])
         : $preference['init_point'];
 
     // ---- Build HTML ----
-    return _mercadopago_renderPaymentButton($checkoutUrl, $totalAmount, $amount, $taxaFixa, $taxaPercentual, $invoiceId);
+    return _seixastec_mercadopago_renderPaymentButton($checkoutUrl, $totalAmount, $amount, $taxaFixa, $taxaPercentual, $invoiceId);
 }
 
 // ---------------------------------------------------------------------------
 // Refund
 // ---------------------------------------------------------------------------
 
-function mercadopago_refund(array $params): array
+function seixastec_mercadopago_refund(array $params): array
 {
     $sandboxMode        = $params['sandboxMode'] === 'on';
     $accessToken        = $sandboxMode ? $params['sandboxAccessToken'] : $params['accessToken'];
@@ -262,7 +262,7 @@ function mercadopago_refund(array $params): array
     $result = $api->refundPayment($transactionId, $refundAmount);
 
     if ($result !== null) {
-        logModuleCall('mercadopago', 'refund', $params, $result, null, [$accessToken]);
+        logModuleCall('seixastec_mercadopago', 'refund', $params, $result, null, [$accessToken]);
         return [
             'status'  => 'success',
             'rawdata' => $result,
@@ -271,7 +271,7 @@ function mercadopago_refund(array $params): array
     }
 
     $error = $api->getLastError();
-    logModuleCall('mercadopago', 'refund', $params, 'ERROR: ' . json_encode($error), null, [$accessToken]);
+    logModuleCall('seixastec_mercadopago', 'refund', $params, 'ERROR: ' . json_encode($error), null, [$accessToken]);
 
     return [
         'status'  => 'error',
@@ -291,7 +291,7 @@ function mercadopago_refund(array $params): array
  * Uses a direct Capsule (Eloquent) query against tblcustomfields because there
  * is no dedicated GetCustomFields local API in WHMCS for client fields.
  */
-function _mercadopago_getCustomFieldsDropdown(): string
+function _seixastec_mercadopago_getCustomFieldsDropdown(): string
 {
     try {
         $fields = \WHMCS\Database\Capsule::table('tblcustomfields')
@@ -319,7 +319,7 @@ function _mercadopago_getCustomFieldsDropdown(): string
  * Queries tblcustomfieldsvalues directly to avoid relying on the
  * localAPI structure which can vary across WHMCS versions.
  */
-function _mercadopago_getClientCustomField(int $clientId, int $fieldId): string
+function _seixastec_mercadopago_getClientCustomField(int $clientId, int $fieldId): string
 {
     try {
         $row = \WHMCS\Database\Capsule::table('tblcustomfieldsvalues')
@@ -336,14 +336,14 @@ function _mercadopago_getClientCustomField(int $clientId, int $fieldId): string
 /**
  * Persist the Mercado Pago preference ID for later webhook matching.
  */
-function _mercadopago_savePreference(int $invoiceId, string $preferenceId): void
+function _seixastec_mercadopago_savePreference(int $invoiceId, string $preferenceId): void
 {
     try {
         $capsule = \WHMCS\Database\Capsule::table('tblinvoices');
         // We store the preference ID in a dedicated option or a custom module data table.
         // Using WHMCS invoice notes as fallback – a proper implementation should use
         // a dedicated module data table.
-        \WHMCS\Module\Gateway\Data::set('mercadopago', 'pref_' . $invoiceId, $preferenceId);
+        \WHMCS\Module\Gateway\Data::set('seixastec_mercadopago', 'pref_' . $invoiceId, $preferenceId);
     } catch (\Throwable) {
         // ignore – not critical for the payment flow
     }
@@ -352,7 +352,7 @@ function _mercadopago_savePreference(int $invoiceId, string $preferenceId): void
 /**
  * Render the payment button and fee summary HTML.
  */
-function _mercadopago_renderPaymentButton(
+function _seixastec_mercadopago_renderPaymentButton(
     string $checkoutUrl,
     float  $totalAmount,
     float  $originalAmount,

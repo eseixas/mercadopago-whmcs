@@ -1,0 +1,32 @@
+{
+    "schema": "1.0",
+    "type": "whmcs-gateways",
+    "name": "seixastec_mercadopago",
+    "license": "MIT",
+    "category": "payments",
+    "description": {
+        "name": "MercadoPago",
+        "tagline": "Integração com o MercadoPago",
+        "long": "O módulo MercadoPago permite integrar o MercadoPago diretamente ao seu WHMCS.",
+        "features": [
+            "Integração com o MercadoPago.",
+            "Todos os métodos de pagamento disponíveis na sua conta do MercadoPago.",
+            "Retorno automática usando webhoook."
+        ]
+    },
+    "logo": {
+        "filename": "logo.png"
+    },
+    "support": {
+        "homepage": "https://www.seixastecnologia.com.br",
+        "email": "contato@seixastecnologia.com.br",
+        "learn_more": "https://github.com/eseixas/mercadopago-whmcs",
+        "support_url": "https://github.com/eseixas/mercadopago-whmcs/issues"
+    },
+    "authors": [
+        {
+            "name": "Seixas Tecnologia",
+            "homepage": "https://www.seixastecnologia.com.br"
+        }
+    ]
+}

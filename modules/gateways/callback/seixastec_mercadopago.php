@@ -4,7 +4,7 @@
  * Mercado Pago - WHMCS Webhook / IPN Callback Handler
  *
  * URL registrada no painel do Mercado Pago (Webhooks):
- *   https://SEU_WHMCS/modules/gateways/callback/mercadopago.php
+ *   https://SEU_WHMCS/modules/gateways/callback/seixastec_mercadopago.php
  *
  * Compatible with: WHMCS 9.x | PHP 8.3 | Mercado Pago API v1
  *
@@ -20,15 +20,15 @@ require_once __DIR__ . '/../../../init.php';
 require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
 
-use WHMCS\Module\Gateway\MercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
 
-require_once __DIR__ . '/../mercadopago/Api.php';
+require_once __DIR__ . '/../seixastec_mercadopago/Api.php';
 
 // ---------------------------------------------------------------------------
 // Identify gateway & load configuration
 // ---------------------------------------------------------------------------
 
-$gatewayModuleName = 'mercadopago';
+$gatewayModuleName = 'seixastec_mercadopago';
 $gatewayParams     = getGatewayVariables($gatewayModuleName);
 
 if (!$gatewayParams['type']) {

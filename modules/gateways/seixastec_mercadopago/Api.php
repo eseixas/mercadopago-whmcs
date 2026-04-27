@@ -14,7 +14,7 @@
 declare(strict_types = 1)
 ;
 
-namespace WHMCS\Module\Gateway\MercadoPago;
+namespace WHMCS\Module\Gateway\SeixastecMercadoPago;
 
 class Api
 {
@@ -175,7 +175,7 @@ class Api
         if ($curlError) {
             $this->lastError = ['curl_error' => $curlError];
             logModuleCall(
-                'mercadopago',
+                'seixastec_mercadopago',
                 'API ' . $method . ' ' . $endpoint,
                 $data,
                 'cURL Error: ' . $curlError,
@@ -187,7 +187,7 @@ class Api
         $decoded = json_decode($response, true);
 
         logModuleCall(
-            'mercadopago',
+            'seixastec_mercadopago',
             'API ' . $method . ' ' . $endpoint,
             $data,
             $response,
