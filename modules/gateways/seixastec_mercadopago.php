@@ -428,7 +428,7 @@ function seixastec_mercadopago_buildPreference(array $params, int $invoiceId, fl
         (int) ($client['userid'] ?? 0),
         $docFieldId
     );
-    $docInfo = $document !== '' ? Validator::inspect($document) : null;
+    $docInfo = $document !== '' ? \WHMCS\Module\Gateway\SeixastecMercadoPago\Validator::inspect($document) : null;
 
     $phoneDigits = preg_replace('/\D/', '', (string) ($client['phonenumber'] ?? '')) ?? '';
 
