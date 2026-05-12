@@ -193,7 +193,7 @@ final class Validator
      * Mascara documento para uso em logs (compliance LGPD).
      *
      *   CPF:  ***.***.***-12
-     *   CNPJ: **.***.***/****-12
+     *   CNPJ: XX.XXX.XXX/XXXX-12
      */
     public static function mask(string $document): string
     {
@@ -205,7 +205,7 @@ final class Validator
         }
 
         if ($len === 14) {
-            return '**.***.***/****-' . substr($clean, -2);
+            return 'XX.XXX.XXX/XXXX-' . substr($clean, -2);
         }
 
         return str_repeat('*', max(0, $len - 2)) . substr($clean, -2);
