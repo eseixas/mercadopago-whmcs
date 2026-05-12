@@ -1,19 +1,31 @@
 <?php
-
 /**
- * Mercado Pago - WHMCS Payment Gateway Module
+ * Mercado Pago - Módulo Principal do Gateway WHMCS
  *
- * Supports: PIX, Boleto Bancário, Cartão de Crédito, Cartão de Débito.
+ * Arquivo carregado pelo WHMCS para registrar o gateway. Define:
+ *   - seixastec_mercadopago_MetaData()  Metadados do módulo
+ *   - seixastec_mercadopago_config()    Campos do painel admin
+ *   - seixastec_mercadopago_link()      Botão "Pagar agora" na fatura
+ *   - seixastec_mercadopago_refund()    Handler de reembolso
  *
- * Compatible with: WHMCS 9.x | PHP 8.3 | Mercado Pago API v1
+ * Fluxo:
+ *   1. Admin configura credenciais via _config()
+ *   2. Cliente abre fatura → _link() gera preferência no MP
+ *   3. Cliente é redirecionado ao Checkout Pro
+ *   4. Webhook (callback/) confirma pagamento e baixa a fatura
+ *   5. Admin pode reembolsar via _refund()
  *
- * @author      Eduardo Seixas
- * @copyright   2026
- * @license     GPL-3.0
+ * Compatível com: WHMCS 8.x / 9.x | PHP 8.1+ | Mercado Pago API v1
+ *
+ * Autor: Eduardo Seixas
+ * Versão: 2.1.0
+ * Atualizado: 2026-05-11
+ * Licença: GPL-3.0
  */
 
 declare(strict_types=1);
 
+use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Validator;
 
@@ -21,549 +33,522 @@ if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
+// Autoload das classes auxiliares
 require_once __DIR__ . '/seixastec_mercadopago/Api.php';
 require_once __DIR__ . '/seixastec_mercadopago/Validator.php';
 
-// ---------------------------------------------------------------------------
-// Module metadata
-// ---------------------------------------------------------------------------
+// =======================================================================
+// METADADOS DO MÓDULO
+// =======================================================================
 
 function seixastec_mercadopago_MetaData(): array
 {
     return [
-        'DisplayName' => 'Mercado Pago',
-        'APIVersion'  => '1.1',
-        'Author'      => 'Your Name',
-        'Description' => 'Integração com Mercado Pago: PIX, Boleto, Cartão de Crédito e Débito.',
+        'DisplayName'                 => 'Mercado Pago (PIX, Boleto e Cartão)',
+        'APIVersion'                  => '1.1',
+        'DisableLocalCreditCardInput' => true,
+        'TokenisedStorage'            => false,
     ];
 }
 
-// ---------------------------------------------------------------------------
-// Configuration fields
-// ---------------------------------------------------------------------------
+// =======================================================================
+// CONFIGURAÇÃO (Painel Admin)
+// =======================================================================
 
 function seixastec_mercadopago_config(): array
 {
-    $customFields = _seixastec_mercadopago_getCustomFieldsDropdown();
+    $customFieldsOptions = seixastec_mercadopago_buildCustomFieldsDropdown();
+    $webhookUrl          = seixastec_mercadopago_getWebhookUrl();
 
     return [
         'FriendlyName' => [
             'Type'  => 'System',
-            'Value' => 'Mercado Pago',
+            'Value' => 'Mercado Pago (PIX, Boleto e Cartão)',
         ],
-        'accessToken' => [
+
+        // ─────────── CREDENCIAIS ───────────
+        'sectionCredentials' => [
+            'FriendlyName' => '<b style="color:#009ee3">🔑 Credenciais do Mercado Pago</b>',
+            'Type'         => 'System',
+            'Description'  => 'Obtenha em <a href="https://www.mercadopago.com.br/developers/panel/app" target="_blank">Painel do Desenvolvedor → Suas Integrações → Credenciais</a>.',
+        ],
+        'accessTokenProd' => [
             'FriendlyName' => 'Access Token (Produção)',
             'Type'         => 'password',
-            'Size'         => 80,
-            'Description'  => 'Seu Access Token de produção do painel do Mercado Pago.',
+            'Size'         => '80',
+            'Default'      => '',
+            'Description'  => 'Token de produção (APP_USR-...). Use apenas em ambiente real.',
         ],
-        'sandboxAccessToken' => [
+        'accessTokenSandbox' => [
             'FriendlyName' => 'Access Token (Sandbox)',
             'Type'         => 'password',
-            'Size'         => 80,
-            'Description'  => 'Access Token para testes em ambiente sandbox.',
+            'Size'         => '80',
+            'Default'      => '',
+            'Description'  => 'Token de teste (TEST-...). Use para testes sem cobrança real.',
         ],
         'sandboxMode' => [
             'FriendlyName' => 'Modo Sandbox',
             'Type'         => 'yesno',
-            'Description'  => 'Ative para utilizar o ambiente de testes do Mercado Pago.',
+            'Description'  => 'Quando ativo, usa o token Sandbox e URLs de teste do MP.',
         ],
-        'taxaPercentual' => [
+        'publicKeyProd' => [
+            'FriendlyName' => 'Public Key (Produção)',
+            'Type'         => 'password',
+            'Size'         => '80',
+            'Default'      => '',
+            'Description'  => 'Chave pública de produção (APP_USR-...). Necessária para o Payment Brick.',
+        ],
+        'publicKeySandbox' => [
+            'FriendlyName' => 'Public Key (Sandbox)',
+            'Type'         => 'password',
+            'Size'         => '80',
+            'Default'      => '',
+            'Description'  => 'Chave pública de teste (TEST-...). Necessária para o Payment Brick.',
+        ],
+
+        // ─────────── WEBHOOK ───────────
+        'sectionWebhook' => [
+            'FriendlyName' => '<b style="color:#009ee3">🔔 Webhook (Notificações)</b>',
+            'Type'         => 'System',
+            'Description'  => 'Configure em <a href="https://www.mercadopago.com.br/developers/panel/webhooks" target="_blank">Painel do Desenvolvedor → Webhooks</a>.<br>'
+                . '<b>URL do webhook:</b> <code style="background:#f0f0f0;padding:4px 8px;border-radius:3px;font-size:12px;">'
+                . htmlspecialchars($webhookUrl, ENT_QUOTES, 'UTF-8') . '</code>',
+        ],
+        'webhookSecret' => [
+            'FriendlyName' => 'Webhook Secret (HMAC)',
+            'Type'         => 'password',
+            'Size'         => '80',
+            'Default'      => '',
+            'Description'  => 'Chave secreta gerada no painel do MP. Quando preenchida, todas as notificações são validadas via HMAC-SHA256. '
+                . '<b>Recomendado em produção.</b>',
+        ],
+
+        // ─────────── TAXAS ───────────
+        'sectionFees' => [
+            'FriendlyName' => '<b style="color:#009ee3">💰 Taxas Adicionais</b>',
+            'Type'         => 'System',
+            'Description'  => 'Taxas somadas ao valor da fatura (repassadas ao cliente).',
+        ],
+        'feePercent' => [
             'FriendlyName' => 'Taxa Percentual (%)',
             'Type'         => 'text',
-            'Size'         => 10,
+            'Size'         => '6',
             'Default'      => '0',
-            'Description'  => 'Porcentagem adicional cobrada do cliente por usar este gateway. Ex.: 2.5 (não incluir o %). Use ponto (.) como separador decimal.',
+            'Description'  => 'Ex.: 2.5 — somada como percentual sobre o valor.',
         ],
-        'taxaFixa' => [
+        'feeFixed' => [
             'FriendlyName' => 'Taxa Fixa (R$)',
             'Type'         => 'text',
-            'Size'         => 10,
+            'Size'         => '6',
             'Default'      => '0',
-            'Description'  => 'Valor fixo adicional cobrado do cliente. Ex.: 2.00. Use ponto (.) como separador decimal.',
+            'Description'  => 'Ex.: 2.00 — valor fixo adicional.',
         ],
-        'vencimentoBoleto' => [
-            'FriendlyName' => 'Vencimento padrão para boletos emitidos (dias)',
+
+        // ─────────── VENCIMENTO E MULTA ───────────
+        'sectionDue' => [
+            'FriendlyName' => '<b style="color:#009ee3">📅 Vencimento, Multa e Juros</b>',
+            'Type'         => 'System',
+        ],
+        'dueDays' => [
+            'FriendlyName' => 'Vencimento padrão (dias)',
             'Type'         => 'text',
-            'Size'         => 5,
+            'Size'         => '4',
             'Default'      => '3',
-            'Description'  => 'Quantidade de dias de vencimento para boletos reemitidos (faturas já vencidas).',
+            'Description'  => 'Dias até o vencimento de boletos / preferências.',
         ],
-        'multaAtraso' => [
-            'FriendlyName' => 'Percentual da multa por atraso (%)',
+        'finePercent' => [
+            'FriendlyName' => 'Multa por atraso (%)',
             'Type'         => 'text',
-            'Size'         => 5,
+            'Size'         => '4',
             'Default'      => '2',
-            'Description'  => 'Máximo de 2%, conforme art. 52 §1º do CDC (Lei 8.078/90). Use ponto (.) como separador decimal.',
+            'Description'  => 'Máximo legal: 2% (CDC Art. 52 §1º).',
         ],
-        'jurosDia' => [
+        'interestMonthly' => [
             'FriendlyName' => 'Juros proporcional (% ao mês)',
             'Type'         => 'text',
-            'Size'         => 5,
+            'Size'         => '4',
             'Default'      => '1',
-            'Description'  => 'Aplicando 1% ao mês, o valor será cobrado proporcionalmente por dia de atraso (0,033%/dia). Use ponto (.) como separador decimal.',
+            'Description'  => 'Ex.: 1% ao mês = 0,033%/dia.',
         ],
-        'gerarParaTodos' => [
-            'FriendlyName' => 'Gerar boletos para todos os pedidos?',
+
+        // ─────────── COMPORTAMENTO ───────────
+        'sectionBehavior' => [
+            'FriendlyName' => '<b style="color:#009ee3">⚙️ Comportamento</b>',
+            'Type'         => 'System',
+        ],
+        'generateForAll' => [
+            'FriendlyName' => 'Gerar para todos os pedidos?',
             'Type'         => 'yesno',
-            'Description'  => 'Se ativado, gera boleto/PIX para qualquer pedido. Se desativado, somente quando o cliente escolher Mercado Pago como forma de pagamento.',
+            'Description'  => 'Sim = qualquer fatura terá PIX/Boleto pré-gerados. Não = apenas ao selecionar o gateway.',
         ],
-        'cpfCnpjFieldId' => [
-            'FriendlyName' => 'Campo CPF/CNPJ do cliente',
+        'cpfCnpjField' => [
+            'FriendlyName' => 'Campo CPF/CNPJ',
             'Type'         => 'dropdown',
-            'Options'      => $customFields,
-            'Description'  => 'Selecione o campo personalizado que contém o CPF ou CNPJ do cliente.',
+            'Options'      => $customFieldsOptions,
+            'Description'  => 'Campo personalizado do cliente que armazena CPF/CNPJ.',
         ],
-        'validarCpfCnpj' => [
+        'validateDocument' => [
             'FriendlyName' => 'Validar CPF/CNPJ no checkout?',
             'Type'         => 'yesno',
-            'Description'  => 'Se ativado, valida o CPF ou CNPJ antes de redirecionar ao Mercado Pago.',
+            'Description'  => 'Bloqueia pagamento se documento for matematicamente inválido.',
+        ],
+        'paymentMethods' => [
+            'FriendlyName' => 'Metodos de pagamento (Brick)',
+            'Type'         => 'dropdown',
+            'Options'      => [
+                'all'      => 'Todos os metodos',
+                'pix'      => 'Apenas PIX',
+                'card'     => 'Apenas Cartao (credito + debito)',
+                'ticket'   => 'Apenas Boleto',
+                'pix_card' => 'PIX + Cartao',
+            ],
+            'Default'      => 'all',
+            'Description'  => 'Define quais metodos serao exibidos no Payment Brick.',
+        ],
+        'maxInstallments' => [
+            'FriendlyName' => 'Parcelas maximas',
+            'Type'         => 'text',
+            'Size'         => '2',
+            'Default'      => '12',
+            'Description'  => 'Numero maximo de parcelas para cartao de credito.',
+        ],
+        'pixExpiration' => [
+            'FriendlyName' => 'Expiracao PIX (minutos)',
+            'Type'         => 'text',
+            'Size'         => '4',
+            'Default'      => '30',
+            'Description'  => 'Tempo de expiracao do QR Code PIX em minutos.',
+        ],
+
+        // ─────────── DEBUG ───────────
+        'sectionDebug' => [
+            'FriendlyName' => '<b style="color:#009ee3">🐛 Debug</b>',
+            'Type'         => 'System',
+        ],
+        'debugMode' => [
+            'FriendlyName' => 'Modo Debug',
+            'Type'         => 'yesno',
+            'Description'  => 'Registra todas as chamadas à API no Module Log do WHMCS.',
         ],
     ];
 }
 
-// ---------------------------------------------------------------------------
-// Payment link (invoice view)
-// ---------------------------------------------------------------------------
+// =======================================================================
+// LINK DE PAGAMENTO (Botão "Pagar agora")
+// =======================================================================
 
 function seixastec_mercadopago_link(array $params): string
 {
-    // ---- Gather basic params ----
-    $invoiceId      = (int) $params['invoiceid'];
-    $amount         = (float) $params['amount'];
-    $currencyCode   = $params['currency'];
-    $clientDetails  = $params['clientdetails'];
-    $systemUrl      = $params['systemurl'];
-    $langPayNow     = $params['langpaynow'];
-    $moduleName     = $params['paymentmethod'];
+    $invoiceId = (int) $params['invoiceid'];
+    $amount    = (float) $params['amount'];
 
-    // ---- Gateway config ----
-    $sandboxMode        = $params['sandboxMode'] === 'on';
-    $accessToken        = $sandboxMode ? $params['sandboxAccessToken'] : $params['accessToken'];
-    $taxaPercentual     = (float) ($params['taxaPercentual'] ?? 0);
-    $taxaFixa           = (float) ($params['taxaFixa'] ?? 0);
-    $vencimentoDias     = (int)   ($params['vencimentoBoleto'] ?? 3);
-    $multaAtraso        = min((float) ($params['multaAtraso'] ?? 2), 2.0);
-    $jurosMes           = (float) ($params['jurosDia'] ?? 1);
-    $validarCpfCnpj     = $params['validarCpfCnpj'] === 'on';
-    $cpfCnpjFieldId     = (int) ($params['cpfCnpjFieldId'] ?? 0);
+    // Calcula valor final com taxas
+    $feePercent  = (float) ($params['feePercent'] ?? 0);
+    $feeFixed    = (float) ($params['feeFixed'] ?? 0);
+    $finalAmount = round($amount + ($amount * $feePercent / 100) + $feeFixed, 2);
 
-    // ---- CPF/CNPJ ----
-    $cpfCnpj = '';
-    if ($cpfCnpjFieldId > 0) {
-        $cpfCnpj = _seixastec_mercadopago_getClientCustomField($clientDetails['userid'], $cpfCnpjFieldId);
-    }
+    // Validação opcional de CPF/CNPJ
+    if (($params['validateDocument'] ?? '') === 'on') {
+        $docFieldId = (int) ($params['cpfCnpjField'] ?? 0);
+        $document   = seixastec_mercadopago_getClientDocument(
+            (int) ($params['clientdetails']['userid'] ?? 0),
+            $docFieldId
+        );
 
-    // Validate CPF/CNPJ if required
-    if ($validarCpfCnpj && !empty($cpfCnpj)) {
-        if (!Validator::validateCpfCnpj($cpfCnpj)) {
-            return '<div class="alert alert-danger">CPF/CNPJ inválido. Por favor, atualize seus dados cadastrais antes de prosseguir com o pagamento.</div>';
+        if ($document === '' || !Validator::validate($document)) {
+            return seixastec_mercadopago_renderError(
+                'CPF/CNPJ inválido ou não preenchido',
+                'Atualize seu cadastro com um documento válido antes de pagar.'
+            );
         }
     }
 
-    // ---- Apply extra fees ----
-    $totalAmount = $amount;
-    if ($taxaFixa > 0) {
-        $totalAmount += $taxaFixa;
+    try {
+        $accessToken = seixastec_mercadopago_getAccessToken($params);
+        $api         = new Api($accessToken, ($params['debugMode'] ?? '') === 'on');
+
+        $preferenceData = seixastec_mercadopago_buildPreference($params, $invoiceId, $finalAmount);
+        $preference     = $api->createPreference($preferenceData);
+
+        if ($preference === null || empty($preference['init_point'])) {
+            return seixastec_mercadopago_renderError(
+                'Erro ao gerar pagamento',
+                $api->getLastError() ?? 'Tente novamente em alguns instantes.'
+            );
+        }
+
+        $checkoutUrl = ($params['sandboxMode'] ?? '') === 'on'
+            ? ($preference['sandbox_init_point'] ?? $preference['init_point'])
+            : $preference['init_point'];
+
+        seixastec_mercadopago_storePreference(
+            $invoiceId,
+            (string) $preference['id'],
+            $finalAmount
+        );
+
+        return seixastec_mercadopago_renderButton($checkoutUrl, $finalAmount, $amount);
+
+    } catch (\Throwable $e) {
+        if (function_exists('logActivity')) {
+            logActivity('[Mercado Pago] Erro link fatura #' . $invoiceId . ': ' . $e->getMessage());
+        }
+        return seixastec_mercadopago_renderError('Erro inesperado', $e->getMessage());
     }
-    if ($taxaPercentual > 0) {
-        $totalAmount += $amount * ($taxaPercentual / 100);
-    }
-    $totalAmount = round($totalAmount, 2);
-
-    // ---- Build preference payload ----
-    $callbackUrl = $systemUrl . 'modules/gateways/callback/seixastec_mercadopago.php';
-    $successUrl  = $systemUrl . 'viewinvoice.php?id=' . $invoiceId . '&paymentsuccess=true';
-    $failureUrl  = $systemUrl . 'viewinvoice.php?id=' . $invoiceId . '&paymentfailed=true';
-    $pendingUrl  = $systemUrl . 'viewinvoice.php?id=' . $invoiceId . '&paymentpending=true';
-
-    $dueDateStr  = date('Y-m-d', strtotime("+{$vencimentoDias} days"));
-
-    $payerInfo = [
-        'name'    => $clientDetails['firstname'],
-        'surname' => $clientDetails['lastname'],
-        'email'   => $clientDetails['email'],
-    ];
-    if (!empty($cpfCnpj)) {
-        $sanitized = preg_replace('/\D/', '', $cpfCnpj);
-        $type = Validator::detectType($cpfCnpj);
-        $payerInfo['identification'] = [
-            'type'   => $type,
-            'number' => $sanitized,
-        ];
-    }
-
-    $preferenceData = [
-        'items' => [
-            [
-                'id'          => (string) $invoiceId,
-                'title'       => 'Fatura #' . $invoiceId,
-                'description' => 'Pagamento de fatura no sistema.',
-                'quantity'    => 1,
-                'currency_id' => $currencyCode,
-                'unit_price'  => $totalAmount,
-            ],
-        ],
-        'payer'              => $payerInfo,
-        'external_reference' => (string) $invoiceId,
-        'back_urls'          => [
-            'success' => $successUrl,
-            'failure' => $failureUrl,
-            'pending' => $pendingUrl,
-        ],
-        'auto_return'       => 'approved',
-        'notification_url'  => $callbackUrl,
-        'payment_methods'   => [
-            'excluded_payment_types' => [],
-        ],
-        'metadata' => [
-            'invoice_id'  => $invoiceId,
-            'whmcs_url'   => $systemUrl,
-        ],
-    ];
-
-    // Add boleto due date for the Brazilian market
-    $preferenceData['date_of_expiration'] = $dueDateStr . 'T23:59:59.000-03:00';
-
-    // ---- Call API ----
-    $api = new Api($accessToken);
-    $preference = $api->createPreference($preferenceData);
-
-    if (!$preference) {
-        $error = $api->getLastError();
-        logModuleCall('seixastec_mercadopago', 'createPreference', $preferenceData, 'ERROR: ' . json_encode($error), null, [$accessToken]);
-        return '<div class="alert alert-danger">Erro ao conectar ao Mercado Pago. Tente novamente ou entre em contato com o suporte. Detalhes: ' . htmlspecialchars(json_encode($error)) . '</div>';
-    }
-
-    // ---- Store preference ID for webhook matching ----
-    _seixastec_mercadopago_savePreference($invoiceId, $preference['id']);
-
-    $checkoutUrl = $sandboxMode
-        ? ($preference['sandbox_init_point'] ?? $preference['init_point'])
-        : $preference['init_point'];
-
-    // ---- Build HTML ----
-    return _seixastec_mercadopago_renderPaymentButton($checkoutUrl, $totalAmount, $amount, $taxaFixa, $taxaPercentual, $invoiceId);
 }
 
-// ---------------------------------------------------------------------------
-// Refund
-// ---------------------------------------------------------------------------
+// =======================================================================
+// REEMBOLSO
+// =======================================================================
 
 function seixastec_mercadopago_refund(array $params): array
 {
-    $sandboxMode        = $params['sandboxMode'] === 'on';
-    $accessToken        = $sandboxMode ? $params['sandboxAccessToken'] : $params['accessToken'];
-    $transactionId      = $params['transid'];        // MP payment ID stored at payment time
-    $refundAmount       = (float) $params['amount']; // WHMCS hands us the refund amount
-    $invoiceId          = (int) $params['invoiceid'];
+    $paymentId = trim((string) ($params['transid'] ?? ''));
+    $amount    = (float) ($params['amount'] ?? 0);
 
-    $api    = new Api($accessToken);
-    $result = $api->refundPayment($transactionId, $refundAmount);
-
-    if ($result !== null) {
-        logModuleCall('seixastec_mercadopago', 'refund', $params, $result, null, [$accessToken]);
+    if ($paymentId === '') {
         return [
-            'status'  => 'success',
-            'rawdata' => $result,
-            'transid' => $result['id'] ?? $transactionId,
+            'status'  => 'error',
+            'rawdata' => ['error' => 'Transaction ID ausente.'],
         ];
     }
 
-    $error = $api->getLastError();
-    logModuleCall('seixastec_mercadopago', 'refund', $params, 'ERROR: ' . json_encode($error), null, [$accessToken]);
+    try {
+        $accessToken = seixastec_mercadopago_getAccessToken($params);
+        $api         = new Api($accessToken, ($params['debugMode'] ?? '') === 'on');
 
-    return [
-        'status'  => 'error',
-        'rawdata' => $error,
-    ];
+        $refund = $api->refundPayment($paymentId, $amount > 0 ? $amount : null);
+
+        if ($refund === null) {
+            return [
+                'status'  => 'declined',
+                'rawdata' => [
+                    'error'     => $api->getLastError(),
+                    'http_code' => $api->getLastHttpCode(),
+                ],
+            ];
+        }
+
+        return [
+            'status'  => 'success',
+            'transid' => (string) ($refund['id'] ?? $paymentId),
+            'rawdata' => $refund,
+        ];
+
+    } catch (\Throwable $e) {
+        return [
+            'status'  => 'error',
+            'rawdata' => ['exception' => $e->getMessage()],
+        ];
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
+// =======================================================================
+// HELPERS INTERNOS
+// =======================================================================
 
 /**
- * Fetch all WHMCS Client Custom Fields and return as a comma-separated list
- * suitable for use in a gateway config "dropdown" option.
- * Format: "id|Label Name, id|Label Name, ..."
- *
- * Uses a direct Capsule (Eloquent) query against tblcustomfields because there
- * is no dedicated GetCustomFields local API in WHMCS for client fields.
+ * Retorna Access Token conforme modo sandbox/produção.
  */
-function _seixastec_mercadopago_getCustomFieldsDropdown(): string
+function seixastec_mercadopago_getAccessToken(array $params): string
+{
+    $isSandbox = ($params['sandboxMode'] ?? '') === 'on';
+    $token = $isSandbox
+        ? (string) ($params['accessTokenSandbox'] ?? '')
+        : (string) ($params['accessTokenProd'] ?? '');
+
+    if ($token === '') {
+        throw new \RuntimeException(
+            $isSandbox
+                ? 'Access Token de Sandbox não configurado.'
+                : 'Access Token de Produção não configurado.'
+        );
+    }
+
+    return $token;
+}
+
+/**
+ * Monta a URL pública do webhook a partir do SystemURL.
+ */
+function seixastec_mercadopago_getWebhookUrl(): string
 {
     try {
-        $fields = \WHMCS\Database\Capsule::table('tblcustomfields')
-            ->where('type', 'client')
-            ->orderBy('fieldname')
-            ->get(['id', 'fieldname']);
-
-        if ($fields->isEmpty()) {
-            return '0|Nenhum campo de cliente encontrado';
-        }
-
-        $options = ['0|-- Selecione um campo --'];
-        foreach ($fields as $field) {
-            $options[] = $field->id . '|' . $field->fieldname;
-        }
-        return implode(',', $options);
+        $systemUrl = (string) Capsule::table('tblconfiguration')
+            ->where('setting', 'SystemURL')
+            ->value('value');
+        return rtrim($systemUrl, '/') . '/modules/gateways/callback/seixastec_mercadopago.php';
     } catch (\Throwable $e) {
-        return '0|Erro ao carregar campos: ' . $e->getMessage();
+        return '/modules/gateways/callback/seixastec_mercadopago.php';
     }
 }
 
 /**
- * Retrieve the value of a custom field for a given client.
- *
- * Queries tblcustomfieldsvalues directly to avoid relying on the
- * localAPI structure which can vary across WHMCS versions.
+ * Constrói o payload completo da preferência MP.
  */
-function _seixastec_mercadopago_getClientCustomField(int $clientId, int $fieldId): string
+function seixastec_mercadopago_buildPreference(array $params, int $invoiceId, float $amount): array
 {
-    try {
-        $row = \WHMCS\Database\Capsule::table('tblcustomfieldsvalues')
-            ->where('relid', $clientId)
-            ->where('fieldid', $fieldId)
-            ->first(['value']);
+    $client    = $params['clientdetails'];
+    $systemUrl = rtrim((string) ($params['systemurl'] ?? ''), '/');
+    $returnUrl = (string) ($params['returnurl'] ?? '');
 
-        return $row ? (string) $row->value : '';
-    } catch (\Throwable) {
+    $docFieldId = (int) ($params['cpfCnpjField'] ?? 0);
+    $document   = seixastec_mercadopago_getClientDocument(
+        (int) ($client['userid'] ?? 0),
+        $docFieldId
+    );
+    $docInfo = $document !== '' ? Validator::inspect($document) : null;
+
+    $phoneDigits = preg_replace('/\D/', '', (string) ($client['phonenumber'] ?? '')) ?? '';
+
+    $preference = [
+        'items' => [[
+            'id'          => (string) $invoiceId,
+            'title'       => 'Fatura #' . $invoiceId,
+            'description' => 'Fatura ' . $invoiceId . ' - ' . ($params['companyname'] ?? 'WHMCS'),
+            'quantity'    => 1,
+            'unit_price'  => $amount,
+            'currency_id' => 'BRL',
+        ]],
+        'payer' => [
+            'name'    => (string) ($client['firstname'] ?? ''),
+            'surname' => (string) ($client['lastname'] ?? ''),
+            'email'   => (string) ($client['email'] ?? ''),
+            'phone'   => [
+                'area_code' => substr($phoneDigits, 0, 2),
+                'number'    => substr($phoneDigits, 2),
+            ],
+            'address' => [
+                'zip_code'      => preg_replace('/\D/', '', (string) ($client['postcode'] ?? '')) ?? '',
+                'street_name'   => (string) ($client['address1'] ?? ''),
+                'street_number' => '0',
+            ],
+        ],
+        'external_reference' => (string) $invoiceId,
+        'notification_url'   => $systemUrl . '/modules/gateways/callback/seixastec_mercadopago.php',
+        'back_urls' => [
+            'success' => $returnUrl,
+            'pending' => $returnUrl,
+            'failure' => $returnUrl,
+        ],
+        'auto_return'          => 'approved',
+        'binary_mode'          => false,
+        'statement_descriptor' => substr((string) ($params['companyname'] ?? 'WHMCS'), 0, 22),
+        'expires'              => true,
+        'expiration_date_to'   => date('c', strtotime('+' . (int) ($params['dueDays'] ?? 3) . ' days')),
+    ];
+
+    if ($docInfo !== null && $docInfo['valid']) {
+        $preference['payer']['identification'] = [
+            'type'   => $docInfo['type'],
+            'number' => $docInfo['clean'],
+        ];
+    }
+
+    return $preference;
+}
+
+/**
+ * Busca o CPF/CNPJ no campo personalizado do cliente.
+ */
+function seixastec_mercadopago_getClientDocument(int $userId, int $fieldId): string
+{
+    if ($fieldId <= 0 || $userId <= 0) {
+        return '';
+    }
+
+    try {
+        $row = Capsule::table('tblcustomfieldsvalues')
+            ->where('fieldid', $fieldId)
+            ->where('relid', $userId)
+            ->first();
+
+        return $row ? trim((string) $row->value) : '';
+    } catch (\Throwable $e) {
         return '';
     }
 }
 
 /**
- * Persist the Mercado Pago preference ID for later webhook matching.
+ * Persiste/atualiza o preference_id na tabela auxiliar.
  */
-function _seixastec_mercadopago_savePreference(int $invoiceId, string $preferenceId): void
+function seixastec_mercadopago_storePreference(int $invoiceId, string $preferenceId, float $amount): void
 {
     try {
-        $capsule = \WHMCS\Database\Capsule::table('tblinvoices');
-        // We store the preference ID in a dedicated option or a custom module data table.
-        // Using WHMCS invoice notes as fallback – a proper implementation should use
-        // a dedicated module data table.
-        \WHMCS\Module\Gateway\Data::set('seixastec_mercadopago', 'pref_' . $invoiceId, $preferenceId);
-    } catch (\Throwable) {
-        // ignore – not critical for the payment flow
+        Capsule::table('mod_seixastec_mp_transactions')->updateOrInsert(
+            ['invoice_id' => $invoiceId],
+            [
+                'preference_id' => $preferenceId,
+                'amount'        => $amount,
+                'status'        => 'pending',
+                'updated_at'    => date('Y-m-d H:i:s'),
+                'created_at'    => Capsule::raw('COALESCE(created_at, NOW())'),
+            ]
+        );
+    } catch (\Throwable $e) {
+        if (function_exists('logActivity')) {
+            logActivity('[Mercado Pago] Falha ao salvar preferência: ' . $e->getMessage());
+        }
     }
 }
 
 /**
- * Render the payment button and fee summary HTML.
+ * Monta o dropdown de campos personalizados de cliente.
  */
-function _seixastec_mercadopago_renderPaymentButton(
-    string $checkoutUrl,
-    float  $totalAmount,
-    float  $originalAmount,
-    float  $taxaFixa,
-    float  $taxaPercentual,
-    int    $invoiceId
-): string {
-    $feeInfo = '';
-    if ($taxaFixa > 0 || $taxaPercentual > 0) {
-        $feeInfo .= '<div class="mp-fee-info">';
-        if ($taxaFixa > 0) {
-            $feeInfo .= '<span>Taxa fixa: R$ ' . number_format($taxaFixa, 2, ',', '.') . '</span>';
+function seixastec_mercadopago_buildCustomFieldsDropdown(): array
+{
+    $options = ['' => '— Selecione um campo —'];
+
+    try {
+        $fields = Capsule::table('tblcustomfields')
+            ->where('type', 'client')
+            ->orderBy('sortorder')
+            ->orderBy('fieldname')
+            ->get(['id', 'fieldname']);
+
+        foreach ($fields as $field) {
+            $options[(string) $field->id] = $field->fieldname . ' (#' . $field->id . ')';
         }
-        if ($taxaPercentual > 0) {
-            $added = round($originalAmount * ($taxaPercentual / 100), 2);
-            $feeInfo .= '<span>Taxa percentual (' . $taxaPercentual . '%): R$ ' . number_format($added, 2, ',', '.') . '</span>';
-        }
-        $feeInfo .= '</div>';
+    } catch (\Throwable $e) {
+        // contexto de instalação
     }
 
-    $totalFormatted = 'R$ ' . number_format($totalAmount, 2, ',', '.');
+    return $options;
+}
 
-    return <<<HTML
-<div class="mercadopago-wrap" id="mp-wrap-{$invoiceId}">
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    .mercadopago-wrap {
-        font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
-        max-width: 480px;
-        margin: 16px auto;
-        padding: 24px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, #009ee3 0%, #00c2d4 100%);
-        box-shadow: 0 8px 32px rgba(0,158,227,.35);
-        color: #fff;
-        text-align: center;
-    }
-    .mercadopago-wrap .mp-logo {
-        display: flex; align-items: center; justify-content: center; gap: 10px;
-        margin-bottom: 16px;
-    }
-    .mercadopago-wrap .mp-logo svg { width: 36px; height: 36px; }
-    .mercadopago-wrap .mp-logo span { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
-    .mercadopago-wrap .mp-methods {
-        display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
-        margin-bottom: 18px;
-    }
-    .mercadopago-wrap .mp-badge {
-        background: rgba(255,255,255,.2);
-        border: 1px solid rgba(255,255,255,.4);
-        border-radius: 20px;
-        padding: 4px 14px;
-        font-size: 13px;
-        font-weight: 500;
-    }
-    .mercadopago-wrap .mp-total {
-        font-size: 28px; font-weight: 700; margin-bottom: 8px;
-        text-shadow: 0 2px 4px rgba(0,0,0,.15);
-    }
-    .mercadopago-wrap .mp-fee-info {
-        display: flex; flex-direction: column; gap: 2px;
-        font-size: 12px; opacity: .85; margin-bottom: 18px;
-    }
-    .mercadopago-wrap .mp-btn {
-        display: inline-block;
-        background: #fff;
-        color: #009ee3;
-        font-size: 16px; font-weight: 700;
-        padding: 14px 38px;
-        border-radius: 30px;
-        text-decoration: none;
-        box-shadow: 0 4px 16px rgba(0,0,0,.2);
-        transition: transform .15s, box-shadow .15s;
-        letter-spacing: .3px;
-    }
-    .mercadopago-wrap .mp-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 24px rgba(0,0,0,.25);
-        color: #007bb5;
-        text-decoration: none;
-    }
-    .mercadopago-wrap .mp-safe {
-        font-size: 11px; margin-top: 14px; opacity: .75;
-    }
-    .mercadopago-wrap .mp-status-bar {
-        display: none;
-        margin-top: 18px;
-        padding: 10px 14px;
-        border-radius: 8px;
-        background: rgba(255,255,255,.18);
-        border: 1px solid rgba(255,255,255,.35);
-        font-size: 13px;
-        font-weight: 500;
-        align-items: center;
-        gap: 8px;
-    }
-    .mercadopago-wrap .mp-status-bar.visible { display: flex; justify-content: center; }
-    .mercadopago-wrap .mp-spinner {
-        width: 16px; height: 16px;
-        border: 2px solid rgba(255,255,255,.4);
-        border-top-color: #fff;
-        border-radius: 50%;
-        animation: mp-spin .7s linear infinite;
-        flex-shrink: 0;
-    }
-    @keyframes mp-spin { to { transform: rotate(360deg); } }
-    .mercadopago-wrap .mp-paid-banner {
-        display: none;
-        margin-top: 18px;
-        padding: 14px;
-        border-radius: 8px;
-        background: rgba(0,200,80,.3);
-        border: 1px solid rgba(0,230,100,.5);
-        font-weight: 700;
-        font-size: 15px;
-    }
-    .mercadopago-wrap .mp-paid-banner.visible { display: block; }
-  </style>
+/**
+ * Renderiza o botão "Pagar com Mercado Pago".
+ */
+function seixastec_mercadopago_renderButton(string $url, float $finalAmount, float $originalAmount): string
+{
+    $extra = $finalAmount > $originalAmount
+        ? sprintf(
+            '<small style="display:block;margin-top:6px;color:#666;">Total com taxas: R$ %s</small>',
+            number_format($finalAmount, 2, ',', '.')
+        )
+        : '';
 
-  <div class="mp-logo">
-    <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="24" cy="24" r="24" fill="#fff"/>
-      <path d="M9 24C9 15.716 15.716 9 24 9s15 6.716 15 15" stroke="#009EE3" stroke-width="4" stroke-linecap="round"/>
-      <path d="M15 24l5 5 5-9 5 9 5-5" stroke="#009EE3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
-    <span>Mercado Pago</span>
-  </div>
+    return sprintf(
+        '<a href="%s" target="_blank" rel="noopener" class="btn btn-primary"
+            style="background:#009ee3;border-color:#009ee3;padding:12px 30px;font-size:16px;">
+            <i class="fas fa-credit-card"></i> Pagar com Mercado Pago
+         </a>%s',
+        htmlspecialchars($url, ENT_QUOTES, 'UTF-8'),
+        $extra
+    );
+}
 
-  <div class="mp-methods">
-    <span class="mp-badge">🏦 Boleto</span>
-    <span class="mp-badge">📱 PIX</span>
-    <span class="mp-badge">💳 Crédito</span>
-    <span class="mp-badge">💳 Débito</span>
-  </div>
-
-  <div class="mp-total">{$totalFormatted}</div>
-  {$feeInfo}
-
-  <a id="mp-pay-btn-{$invoiceId}" href="{$checkoutUrl}" class="mp-btn" target="_blank" rel="noopener noreferrer"
-     onclick="mpStartPolling({$invoiceId})">
-    Pagar agora
-  </a>
-
-  <div id="mp-status-{$invoiceId}" class="mp-status-bar">
-    <span class="mp-spinner"></span>
-    <span id="mp-status-text-{$invoiceId}">Aguardando confirmação do pagamento…</span>
-  </div>
-
-  <div id="mp-paid-{$invoiceId}" class="mp-paid-banner">
-    ✅ Pagamento confirmado! Redirecionando…
-  </div>
-
-  <p class="mp-safe">🔒 Pagamento 100% seguro via Mercado Pago</p>
-</div>
-
-<script>
-(function() {
-    var MP_POLL_INTERVAL = 5000;   // check every 5 seconds
-    var MP_POLL_MAX     = 120;     // max 120 attempts = 10 minutes
-    var mp_timers       = {};
-    var mp_attempts     = {};
-
-    window.mpStartPolling = function(invoiceId) {
-        if (mp_timers[invoiceId]) return; // already running
-        mp_attempts[invoiceId] = 0;
-
-        // Show the "waiting" bar after a short delay (let the tab open first)
-        setTimeout(function() {
-            var bar = document.getElementById('mp-status-' + invoiceId);
-            if (bar) bar.classList.add('visible');
-        }, 2000);
-
-        mp_timers[invoiceId] = setInterval(function() {
-            mp_attempts[invoiceId]++;
-
-            if (mp_attempts[invoiceId] > MP_POLL_MAX) {
-                clearInterval(mp_timers[invoiceId]);
-                var txt = document.getElementById('mp-status-text-' + invoiceId);
-                if (txt) txt.textContent = 'Tempo de espera esgotado. Atualize a página manualmente.';
-                return;
-            }
-
-            // Poll the WHMCS invoice page for the paid status
-            fetch('/viewinvoice.php?id=' + invoiceId, {
-                method: 'GET',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                credentials: 'same-origin'
-            })
-            .then(function(r) { return r.text(); })
-            .then(function(html) {
-                // WHMCS renders "PAID" or "Pago" in the invoice status badge when paid
-                var paid = /class="[^"]*label-success[^"]*"[^>]*>\s*(Pago|Paid|PAID)/i.test(html)
-                        || /status[^>]*>\s*(Paid|Pago|PAID)/i.test(html)
-                        || html.indexOf('paymentsuccess=true') !== -1;
-
-                if (paid) {
-                    clearInterval(mp_timers[invoiceId]);
-                    var bar    = document.getElementById('mp-status-' + invoiceId);
-                    var banner = document.getElementById('mp-paid-' + invoiceId);
-                    if (bar)    bar.classList.remove('visible');
-                    if (banner) banner.classList.add('visible');
-                    // Redirect after 2 seconds
-                    setTimeout(function() {
-                        window.location.href = '/viewinvoice.php?id=' + invoiceId + '&paymentsuccess=true';
-                    }, 2000);
-                }
-            })
-            .catch(function() { /* silent – try again next interval */ });
-        }, MP_POLL_INTERVAL);
-    };
-})();
-</script>
-HTML;
+/**
+ * Renderiza uma mensagem de erro no lugar do botão.
+ */
+function seixastec_mercadopago_renderError(string $title, string $message): string
+{
+    return sprintf(
+        '<div class="alert alert-danger" style="margin:10px 0;">
+            <strong>⚠️ %s</strong><br>
+            <small>%s</small>
+         </div>',
+        htmlspecialchars($title, ENT_QUOTES, 'UTF-8'),
+        htmlspecialchars($message, ENT_QUOTES, 'UTF-8')
+    );
 }

@@ -2,7 +2,7 @@
     "schema": "1.0",
     "type": "whmcs-gateways",
     "name": "seixastec_mercadopago",
-    "license": "MIT",
+    "license": "GPL-3.0",
     "category": "payments",
     "description": {
         "name": "MercadoPago",

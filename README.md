@@ -6,7 +6,7 @@
 [![PHP](https://img.shields.io/badge/PHP-8.3-777BB4?style=flat-square&logo=php)](https://www.php.net)
 [![API](https://img.shields.io/badge/Mercado%20Pago-API%20v1-009ee3?style=flat-square)](https://www.mercadopago.com.br/developers)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.0.3-orange?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.1.0-orange?style=flat-square)](CHANGELOG.md)
 
 Integração completa com o **Mercado Pago** para WHMCS 9.x via API — com suporte a PIX, Boleto, Cartão de Crédito e Débito, confirmação automática de pagamentos e muito mais.
 
@@ -154,6 +154,36 @@ Essas informações são injetadas nas variáveis do PDF (`InvoicePdfVars`) e no
 
 ---
 
+## 🎯 Variáveis Disponibilizadas pelo Hook
+
+O hook `seixastec_mercadopago_pdf.php` expõe variáveis que podem ser usadas em templates do WHMCS para customizar a exibição dos dados de pagamento.
+
+### 📄 Template PDF da fatura (`invoicepdf.tpl`)
+
+Variáveis injetadas via `InvoicePdfVars`:
+
+| Variável | Tipo | Conteúdo |
+|---|---|---|
+| `{$mp_pix_qr_base64}` | string | QR Code PIX em base64 puro (sem prefixo `data:`) |
+| `{$mp_pix_qr_image}` | string | Data URI completo: `data:image/png;base64,...` |
+| `{$mp_pix_copia_cola}` | string | Código PIX Copia e Cola |
+| `{$mp_pix_html}` | string (HTML) | Bloco HTML completo do PIX (QR + instruções) |
+| `{$mp_boleto_url}` | string | URL para visualizar/imprimir boleto |
+| `{$mp_boleto_linha}` | string | Linha digitável do boleto |
+| `{$mp_boleto_barcode}` | string | Código de barras do boleto |
+| `{$mp_boleto_html}` | string (HTML) | Bloco HTML completo do Boleto |
+
+**Exemplo de uso em `invoicepdf.tpl`:**
+
+```smarty
+{if $mp_pix_html}
+    {$mp_pix_html nofilter}
+{/if}
+
+{if $mp_boleto_html}
+    {$mp_boleto_html nofilter}
+{/if}
+
 ## 🔐 Segurança
 
 - O Access Token é **mascarado** em todos os registros de log do WHMCS.
@@ -165,7 +195,7 @@ Essas informações são injetadas nas variáveis do PDF (`InvoicePdfVars`) e no
 
 ## 📝 Licença
 
-Este projeto está licenciado sob a [MIT License](LICENSE).
+Este projeto está licenciado sob a [GPL-3.0 License](LICENSE).
 
 ---
 
