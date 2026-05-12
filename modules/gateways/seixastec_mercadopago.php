@@ -33,9 +33,7 @@ if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
-// Autoload das classes auxiliares
-require_once __DIR__ . '/seixastec_mercadopago/Api.php';
-require_once __DIR__ . '/seixastec_mercadopago/Validator.php';
+// Dependências carregadas sob demanda para evitar erros de autoloader no WHMCS
 
 // =======================================================================
 // METADADOS DO MÓDULO
@@ -239,6 +237,12 @@ function seixastec_mercadopago_config(): array
 
 function seixastec_mercadopago_link(array $params): string
 {
+    try {
+        seixastec_mercadopago_load_dependencies();
+    } catch (\Throwable $e) {
+        return seixastec_mercadopago_renderError('Erro no Módulo Mercado Pago', $e->getMessage());
+    }
+
     $invoiceId = (int) $params['invoiceid'];
     $amount    = (float) $params['amount'];
 
@@ -303,6 +307,15 @@ function seixastec_mercadopago_link(array $params): string
 
 function seixastec_mercadopago_refund(array $params): array
 {
+    try {
+        seixastec_mercadopago_load_dependencies();
+    } catch (\Throwable $e) {
+        return [
+            'status'  => 'error',
+            'rawdata' => ['error' => 'Falha de inicialização: ' . $e->getMessage()],
+        ];
+    }
+
     $paymentId = trim((string) ($params['transid'] ?? ''));
     $amount    = (float) ($params['amount'] ?? 0);
 
@@ -346,6 +359,26 @@ function seixastec_mercadopago_refund(array $params): array
 // =======================================================================
 // HELPERS INTERNOS
 // =======================================================================
+
+/**
+ * Carrega as classes auxiliares do módulo, validando ambiente e arquivos.
+ */
+function seixastec_mercadopago_load_dependencies(): void
+{
+    if (PHP_VERSION_ID < 80100) {
+        throw new \RuntimeException('O módulo Mercado Pago requer PHP 8.1 ou superior (Atual: ' . PHP_VERSION . '). Atualize a versão do PHP.');
+    }
+
+    $apiPath       = __DIR__ . '/seixastec_mercadopago/Api.php';
+    $validatorPath = __DIR__ . '/seixastec_mercadopago/Validator.php';
+
+    if (!file_exists($apiPath) || !file_exists($validatorPath)) {
+        throw new \RuntimeException('Arquivos base do módulo não encontrados (Api.php ou Validator.php). Faça o upload completo novamente.');
+    }
+
+    require_once $apiPath;
+    require_once $validatorPath;
+}
 
 /**
  * Retorna Access Token conforme modo sandbox/produção.
