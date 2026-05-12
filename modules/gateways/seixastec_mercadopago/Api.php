@@ -396,7 +396,7 @@ class Api
      */
     private function sleepBackoff(int $attempt): void
     {
-        $base   = self::RETRY_BACKOFF_MS * (2 ** ($attempt - 1));
+        $base   = self::RETRY_BACKOFF_MS * pow(2, $attempt - 1);
         $jitter = random_int(0, (int) ($base * 0.3));
         usleep(($base + $jitter) * 1000);
     }
