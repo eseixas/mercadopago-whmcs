@@ -406,6 +406,22 @@ class Api
      */
     private function extractErrorMessage(array $response, int $httpCode): string
     {
+        $diagnosticText = strtolower(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+        if (
+            in_array($httpCode, [401, 403], true)
+            && (
+                str_contains($diagnosticText, 'pa_unauthorized_result_from_policies')
+                || str_contains($diagnosticText, 'policyagent')
+                || str_contains($diagnosticText, 'at least one policy returned unauthorized')
+                || str_contains($diagnosticText, 'unauthorized use of live credentials')
+                || str_contains($diagnosticText, 'authorization')
+            )
+        ) {
+            return "[HTTP {$httpCode}] Mercado Pago não autorizou a requisição. "
+                . 'Verifique se o Access Token correto está configurado, se o modo Sandbox/Produção corresponde ao token, '
+                . 'e se a aplicação possui permissões ativas no painel do Mercado Pago.';
+        }
+
         // Formato padrão do MP
         if (!empty($response['message'])) {
             $msg = (string) $response['message'];

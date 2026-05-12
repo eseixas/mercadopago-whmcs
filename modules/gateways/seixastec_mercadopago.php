@@ -273,9 +273,25 @@ function seixastec_mercadopago_link(array $params): string
         $preference     = $api->createPreference($preferenceData);
 
         if ($preference === null || empty($preference['init_point'])) {
+            $error = $api->getLastError() ?? 'Tente novamente em alguns instantes.';
+            seixastec_mercadopago_logPaymentGenerationFailure(
+                $invoiceId,
+                $params,
+                $error,
+                $api->getLastHttpCode(),
+                'POST /checkout/preferences'
+            );
+
+            if (seixastec_mercadopago_isAuthorizationDiagnostic($error, $api->getLastHttpCode())) {
+                return seixastec_mercadopago_renderError(
+                    'Gateway Mercado Pago não está autorizado',
+                    'Entre em contato com o suporte.'
+                );
+            }
+
             return seixastec_mercadopago_renderError(
                 'Erro ao gerar pagamento',
-                $api->getLastError() ?? 'Tente novamente em alguns instantes.'
+                'Tente novamente em alguns instantes.'
             );
         }
 
@@ -294,6 +310,12 @@ function seixastec_mercadopago_link(array $params): string
     } catch (\Throwable $e) {
         if (function_exists('logActivity')) {
             logActivity('[Mercado Pago] Erro link fatura #' . $invoiceId . ': ' . $e->getMessage());
+        }
+        if (seixastec_mercadopago_isAuthorizationDiagnostic($e->getMessage(), null)) {
+            return seixastec_mercadopago_renderError(
+                'Gateway Mercado Pago não está autorizado',
+                'Entre em contato com o suporte.'
+            );
         }
         return seixastec_mercadopago_renderError('Erro inesperado', $e->getMessage());
     }
@@ -384,9 +406,10 @@ function seixastec_mercadopago_load_dependencies(): void
 function seixastec_mercadopago_getAccessToken(array $params): string
 {
     $isSandbox = ($params['sandboxMode'] ?? '') === 'on';
-    $token = $isSandbox
+    $fieldName = $isSandbox ? 'accessTokenSandbox' : 'accessTokenProd';
+    $token = trim($isSandbox
         ? (string) ($params['accessTokenSandbox'] ?? '')
-        : (string) ($params['accessTokenProd'] ?? '');
+        : (string) ($params['accessTokenProd'] ?? ''));
 
     if ($token === '') {
         throw new \RuntimeException(
@@ -396,7 +419,84 @@ function seixastec_mercadopago_getAccessToken(array $params): string
         );
     }
 
+    $tokenType = seixastec_mercadopago_detectCredentialType($token);
+    if ($tokenType === 'public_key') {
+        throw new \RuntimeException(
+            "Configuração Mercado Pago inválida: o campo {$fieldName} contém uma Public Key. Informe o Access Token correspondente."
+        );
+    }
+
+    if ($isSandbox && !str_starts_with($token, 'TEST-')) {
+        throw new \RuntimeException(
+            "Configuração Mercado Pago inválida: modo Sandbox ativo exige Access Token TEST-... no campo {$fieldName}."
+        );
+    }
+
+    if (!$isSandbox && !str_starts_with($token, 'APP_USR-')) {
+        throw new \RuntimeException(
+            "Configuração Mercado Pago inválida: modo Produção exige Access Token APP_USR-... no campo {$fieldName}."
+        );
+    }
+
     return $token;
+}
+
+/**
+ * Classifica credenciais conhecidas sem expor o valor completo.
+ */
+function seixastec_mercadopago_detectCredentialType(string $credential): string
+{
+    $credential = trim($credential);
+    if (preg_match('/^(APP_USR|TEST)-[0-9a-f]{8,}-[0-9]{6,}-[0-9a-f]{8,}$/i', $credential) === 1) {
+        return 'access_token';
+    }
+
+    if (preg_match('/^(APP_USR|TEST)-[0-9a-f]{8,}$/i', $credential) === 1) {
+        return 'public_key';
+    }
+
+    return 'unknown';
+}
+
+/**
+ * Identifica diagnósticos de autenticação/autorização do Mercado Pago.
+ */
+function seixastec_mercadopago_isAuthorizationDiagnostic(string $message, ?int $httpCode): bool
+{
+    $needle = strtolower($message);
+    return in_array($httpCode, [401, 403], true)
+        || str_contains($needle, 'unauthorized')
+        || str_contains($needle, 'policyagent')
+        || str_contains($needle, 'authorization')
+        || str_contains($needle, 'access token')
+        || str_contains($needle, 'public key')
+        || str_contains($needle, 'credenciais')
+        || str_contains($needle, 'configuração mercado pago inválida');
+}
+
+/**
+ * Registra diagnóstico técnico sem exibir detalhes sensíveis ao cliente.
+ */
+function seixastec_mercadopago_logPaymentGenerationFailure(
+    int $invoiceId,
+    array $params,
+    string $error,
+    ?int $httpCode,
+    string $endpoint
+): void {
+    if (!function_exists('logActivity')) {
+        return;
+    }
+
+    $environment = (($params['sandboxMode'] ?? '') === 'on') ? 'sandbox' : 'production';
+    logActivity(
+        '[Mercado Pago] Falha ao gerar pagamento da fatura #'
+        . $invoiceId
+        . ' | ambiente=' . $environment
+        . ' | endpoint=' . $endpoint
+        . ' | http=' . ($httpCode !== null ? (string) $httpCode : 'n/a')
+        . ' | erro=' . $error
+    );
 }
 
 /**

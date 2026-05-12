@@ -20,6 +20,7 @@ composer.lock
 .env
 .env.local
 config.local.php
+_mp_diag.php
 
 # Backup files
 *.bak
