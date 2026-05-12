@@ -26,8 +26,6 @@
 declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
-use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
-use WHMCS\Module\Gateway\SeixastecMercadoPago\Validator;
 
 if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
@@ -259,7 +257,7 @@ function seixastec_mercadopago_link(array $params): string
             $docFieldId
         );
 
-        if ($document === '' || !Validator::validate($document)) {
+        if ($document === '' || !\WHMCS\Module\Gateway\SeixastecMercadoPago\Validator::validate($document)) {
             return seixastec_mercadopago_renderError(
                 'CPF/CNPJ inválido ou não preenchido',
                 'Atualize seu cadastro com um documento válido antes de pagar.'
@@ -269,7 +267,7 @@ function seixastec_mercadopago_link(array $params): string
 
     try {
         $accessToken = seixastec_mercadopago_getAccessToken($params);
-        $api         = new Api($accessToken, ($params['debugMode'] ?? '') === 'on');
+        $api         = new \WHMCS\Module\Gateway\SeixastecMercadoPago\Api($accessToken, ($params['debugMode'] ?? '') === 'on');
 
         $preferenceData = seixastec_mercadopago_buildPreference($params, $invoiceId, $finalAmount);
         $preference     = $api->createPreference($preferenceData);
@@ -328,7 +326,7 @@ function seixastec_mercadopago_refund(array $params): array
 
     try {
         $accessToken = seixastec_mercadopago_getAccessToken($params);
-        $api         = new Api($accessToken, ($params['debugMode'] ?? '') === 'on');
+        $api         = new \WHMCS\Module\Gateway\SeixastecMercadoPago\Api($accessToken, ($params['debugMode'] ?? '') === 'on');
 
         $refund = $api->refundPayment($paymentId, $amount > 0 ? $amount : null);
 
