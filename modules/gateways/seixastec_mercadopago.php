@@ -17,7 +17,7 @@
  *
  * @package   SeixasTec\MercadoPago
  * @author    Eduardo Seixas <https://github.com/eseixas>
- * @version   2.2.0
+ * @version   2.3.0
  * @license   GPL-3.0
  * @link      https://github.com/eseixas/mercadopago-whmcs
  */
@@ -68,7 +68,7 @@ function seixastec_mercadopago_config(): array
         // ----- Cabeçalho -----
         'FriendlyName' => [
             'Type'  => 'System',
-            'Value' => 'Mercado Pago (SeixasTec) v2.2.0',
+            'Value' => 'Mercado Pago (SeixasTec) v2.3.0',
         ],
 
         // ----- Identificação no checkout do cliente -----
