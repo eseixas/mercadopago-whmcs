@@ -296,17 +296,19 @@ function seixastec_mercadopago_refund(array $params): array
 // HELPERS INTERNOS (prefixo _seixastec_mp_)
 // =============================================================================
 
-/**
- * Instancia a API com os parâmetros do gateway.
- */
-function _seixastec_mp_api(array $params): Api
-{
-    return new Api(
-        accessToken: (string) $params['accessToken'],
-        debugMode:   ($params['debugLog'] ?? '') === 'on',
-        productId:   $params['productId'] ?? null,
-        moduleName:  'seixastec_mercadopago'
-    );
+if (!function_exists('_seixastec_mp_api')) {
+    /**
+     * Instancia a API com os parâmetros do gateway.
+     */
+    function _seixastec_mp_api(array $params): Api
+    {
+        return new Api(
+            accessToken: (string) $params['accessToken'],
+            debugMode:   ($params['debugLog'] ?? '') === 'on',
+            productId:   $params['productId'] ?? null,
+            moduleName:  'seixastec_mercadopago'
+        );
+    }
 }
 
 /**

@@ -429,17 +429,19 @@ function _seixastec_mp_gateway(): ?array
     return $gw;
 }
 
-/**
- * Instancia a Api com base na configuração do gateway.
- */
-function _seixastec_mp_api(array $gateway): Api
-{
-    return new Api(
-        accessToken: (string) $gateway['accessToken'],
-        debugMode:   ($gateway['debugLog'] ?? '') === 'on',
-        productId:   $gateway['productId'] ?? null,
-        moduleName:  SEIXASTEC_MP_MODULE
-    );
+if (!function_exists('_seixastec_mp_api')) {
+    /**
+     * Instancia a Api com base na configuração do gateway.
+     */
+    function _seixastec_mp_api(array $gateway): Api
+    {
+        return new Api(
+            accessToken: (string) $gateway['accessToken'],
+            debugMode:   ($gateway['debugLog'] ?? '') === 'on',
+            productId:   $gateway['productId'] ?? null,
+            moduleName:  SEIXASTEC_MP_MODULE
+        );
+    }
 }
 
 /**
