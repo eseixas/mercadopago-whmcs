@@ -24,9 +24,4 @@
     <p class="text-muted small" style="margin-top:12px;">
         🔒 Você será redirecionado ao ambiente seguro do Mercado Pago.
     </p>
-
-    <div style="margin-top:15px;">
-        <img src="https://http2.mlstatic.com/storage/logos-api-admin/8e8b5e30-7b53-11ec-9c12-c30a5cbf7da8-m.svg"
-             alt="Métodos de pagamento aceitos" style="max-height:30px; opacity:.7;">
-    </div>
 </div>
