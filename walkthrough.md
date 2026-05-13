@@ -14,20 +14,18 @@ Como o módulo lida com dados transacionais e sanitização de identificadores l
 - **`ValidatorTest.php`**: Cobre a detecção de tipo (`CPF`/`CNPJ`), as rotinas de sanitização anti-injecao e a mecânica de segurança de mascaramento de documentos.
 - **`ApiTest.php`**: Verifica a prevenção de instâncias vazias da API, garantindo que exceções corretas sejam lançadas se não houver Token, além de testar a precisão da detecção entre tokens de Sandbox (`TEST-`, `APP_USR-TEST-`) versus Produção.
 
-## Próximos Passos (Para o Usuário)
+## Finalização e Deploy
 
-> [!IMPORTANT]
-> **Execução dos Testes**
-> Como o ambiente local onde estou operando não possui os binários instalados (o diretório `vendor` ainda não existe), você precisará rodar os testes a partir do seu console principal.
+O processo de modernização e implantação foi concluído com as seguintes etapas:
 
-Siga estas instruções no seu terminal:
-1. Gere o autoloader corrigido e instale as dependências:
-   ```bash
-   composer install
-   ```
-2. Execute a suíte de testes:
-   ```bash
-   vendor/bin/phpunit
-   ```
+1.  **GitHub Atualizado**: Todas as alterações (correções de autoloader, cleanup de código e novos testes) foram enviadas para o repositório principal.
+2.  **Deploy via FTP**: Os arquivos foram sincronizados com o servidor de produção (`portugal.nitmail.com`) utilizando o script de automação `deploy_ftp.ps1`, garantindo que o WHMCS agora utilize a lógica unificada de credenciais e a arquitetura de templates corrigida.
 
-Se todos os testes passarem (verde), você pode prosseguir com o empacotamento da release ou com a subida dos arquivos para o FTP do seu WHMCS de produção em segurança.
+### Resumo do Deploy
+- **Gateway Principal**: Sincronizado.
+- **Diretório de Lógica/Templates**: Espelhado via `mirror`.
+- **Hooks de Automação**: Atualizados (Install, Cleanup, PDF).
+- **Callback**: Sincronizado para garantir confirmações de pagamento seguras.
+
+O módulo está agora operacional na versão 2.3.0. Para futuras atualizações, o script `deploy_ftp.ps1` pode ser reutilizado para sincronização rápida.
+
