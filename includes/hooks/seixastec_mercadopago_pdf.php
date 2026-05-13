@@ -9,7 +9,7 @@
  *      → Renderiza QR Code PIX + linha digitável de boleto no rodapé.
  *
  *   2. E-mails de fatura (EmailPreSend)
- *      → Disponibiliza variáveis Smarty para uso em templates.
+ *      → Disponibiliza variáveis Smarty (via merge_fields) para uso em templates.
  *
  *   3. Área do cliente (ClientAreaPageViewInvoice)
  *      → Injeta bloco HTML com QR Code, botão "Copiar" e link do boleto.
@@ -28,9 +28,21 @@
  * Compatível com: WHMCS 8.x / 9.x | PHP 8.1+
  *
  * Autor: Eduardo Seixas
- * Versão: 1.0.0
- * Atualizado: 2026-05-11
+ * Versão: 1.1.0
+ * Atualizado: 2026-05-12
  * Licença: GPL-3.0
+ *
+ * Changelog 1.1.0:
+ *   - FIX CRÍTICO: vazamento de arquivos temporários ao gerar QR Code no PDF
+ *   - FIX CRÍTICO: EmailPreSend agora retorna corretamente via 'merge_fields'
+ *   - FIX CRÍTICO: status da fatura buscado direto de tblinvoices (não vinha em $vars)
+ *   - ADD: cache estático de transação e hasTable (performance)
+ *   - ADD: validação base64 antes de decodificar
+ *   - ADD: orderBy('id','desc') pega transação mais recente
+ *   - ADD: logging em catches que antes engoliam exceções
+ *   - ADD: proteção contra redeclaração de função JS
+ *   - ADD: wordwrap no código PIX dentro do PDF
+ *   - ADD: constantes para nomes mágicos
  */
 
 declare(strict_types=1);
@@ -40,6 +52,14 @@ use WHMCS\Database\Capsule;
 if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
+
+// =======================================================================
+// CONSTANTES
+// =======================================================================
+
+const SEIXASTEC_MP_TABLE          = 'mod_seixastec_mp_transactions';
+const SEIXASTEC_MP_HOOK_VERSION   = '1.1.0';
+const SEIXASTEC_MP_GATEWAY_MODULE = 'seixastec_mercadopago';
 
 // =======================================================================
 // HOOK 1: PDF DA FATURA
@@ -56,7 +76,7 @@ add_hook('InvoicePdfGeneration', 1, function (array $vars): void {
         return;
     }
 
-    // Não injeta em faturas já pagas
+    // Não injeta em faturas já aprovadas
     if (($tx->status ?? '') === 'approved') {
         return;
     }
@@ -91,9 +111,7 @@ add_hook('InvoicePdfGeneration', 1, function (array $vars): void {
         }
 
     } catch (\Throwable $e) {
-        if (function_exists('logActivity')) {
-            logActivity('[Mercado Pago] Erro renderizar PDF: ' . $e->getMessage());
-        }
+        seixastec_mp_log('Erro renderizar PDF', $e);
     }
 });
 
@@ -124,7 +142,10 @@ add_hook('EmailPreSend', 1, function (array $vars): array {
         return [];
     }
 
-    return seixastec_mp_buildSmartyVars($tx);
+    // FIX CRÍTICO 1.1.0: EmailPreSend espera 'merge_fields', não array direto
+    return [
+        'merge_fields' => seixastec_mp_buildSmartyVars($tx),
+    ];
 });
 
 // =======================================================================
@@ -142,8 +163,8 @@ add_hook('ClientAreaPageViewInvoice', 1, function (array $vars): array {
         return [];
     }
 
-    // Só exibe bloco interativo em faturas pendentes
-    $status = strtolower((string) ($vars['status'] ?? ''));
+    // FIX CRÍTICO 1.1.0: $vars não contém 'status'. Buscar direto da fatura.
+    $status = seixastec_mp_getInvoiceStatus($invoiceId);
     if (!in_array($status, ['unpaid', 'overdue', 'draft'], true)) {
         return [];
     }
@@ -160,23 +181,73 @@ add_hook('ClientAreaPageViewInvoice', 1, function (array $vars): array {
 
 /**
  * Busca a transação MP vinculada à fatura.
- *
- * @return object|null
+ * Usa cache estático para evitar múltiplas queries na mesma request.
  */
 function seixastec_mp_getTransaction(int $invoiceId): ?object
 {
+    static $cache = [];
+
+    if (array_key_exists($invoiceId, $cache)) {
+        return $cache[$invoiceId];
+    }
+
     try {
-        if (!Capsule::schema()->hasTable('mod_seixastec_mp_transactions')) {
-            return null;
+        if (!seixastec_mp_tableExists()) {
+            return $cache[$invoiceId] = null;
         }
 
-        $row = Capsule::table('mod_seixastec_mp_transactions')
+        $row = Capsule::table(SEIXASTEC_MP_TABLE)
             ->where('invoice_id', $invoiceId)
+            ->orderBy('id', 'desc') // mais recente em caso de retentativas
             ->first();
 
-        return $row ?: null;
+        return $cache[$invoiceId] = ($row ?: null);
     } catch (\Throwable $e) {
-        return null;
+        seixastec_mp_log('Erro getTransaction', $e);
+        return $cache[$invoiceId] = null;
+    }
+}
+
+/**
+ * Verifica se a tabela de transações existe (com cache estático).
+ */
+function seixastec_mp_tableExists(): bool
+{
+    static $exists = null;
+
+    if ($exists === null) {
+        try {
+            $exists = Capsule::schema()->hasTable(SEIXASTEC_MP_TABLE);
+        } catch (\Throwable $e) {
+            seixastec_mp_log('Erro hasTable', $e);
+            $exists = false;
+        }
+    }
+
+    return $exists;
+}
+
+/**
+ * Busca o status atual de uma fatura no banco.
+ */
+function seixastec_mp_getInvoiceStatus(int $invoiceId): string
+{
+    static $cache = [];
+
+    if (array_key_exists($invoiceId, $cache)) {
+        return $cache[$invoiceId];
+    }
+
+    try {
+        $invoice = Capsule::table('tblinvoices')
+            ->where('id', $invoiceId)
+            ->first(['status']);
+
+        $status = $invoice ? strtolower((string) $invoice->status) : '';
+        return $cache[$invoiceId] = $status;
+    } catch (\Throwable $e) {
+        seixastec_mp_log('Erro getInvoiceStatus', $e);
+        return $cache[$invoiceId] = '';
     }
 }
 
@@ -194,6 +265,34 @@ function seixastec_mp_buildSmartyVars(object $tx): array
         'mp_status'         => (string) ($tx->status ?? ''),
         'mp_payment_id'     => (string) ($tx->payment_id ?? ''),
     ];
+}
+
+/**
+ * Logger centralizado.
+ */
+function seixastec_mp_log(string $context, \Throwable $e): void
+{
+    if (function_exists('logActivity')) {
+        logActivity(sprintf(
+            '[Mercado Pago Hook v%s] %s: %s (em %s:%d)',
+            SEIXASTEC_MP_HOOK_VERSION,
+            $context,
+            $e->getMessage(),
+            basename($e->getFile()),
+            $e->getLine()
+        ));
+    }
+}
+
+/**
+ * Valida se uma string é base64 válida.
+ */
+function seixastec_mp_isValidBase64(string $data): bool
+{
+    if ($data === '' || strlen($data) % 4 !== 0) {
+        return false;
+    }
+    return (bool) preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $data);
 }
 
 /**
@@ -230,23 +329,29 @@ function seixastec_mp_renderClientBlock(object $tx): string
     </div>
 </div>
 <script>
-function mpCopyPixCode(btn) {
-    var el = document.getElementById('mp-pix-code');
-    el.select(); el.setSelectionRange(0, 99999);
-    var done = false;
-    try {
-        if (navigator.clipboard) {
-            navigator.clipboard.writeText(el.value);
-            done = true;
-        } else {
-            done = document.execCommand('copy');
+if (typeof window.mpCopyPixCode === 'undefined') {
+    window.mpCopyPixCode = function(btn) {
+        var el = document.getElementById('mp-pix-code');
+        if (!el) return;
+        el.select();
+        el.setSelectionRange(0, 99999);
+        var done = false;
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(el.value);
+                done = true;
+            } else {
+                done = document.execCommand('copy');
+            }
+        } catch(e) {
+            console.warn('[MP] Falha ao copiar:', e);
         }
-    } catch(e) {}
-    if (done) {
-        var orig = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-check"></i> Copiado!';
-        setTimeout(function(){ btn.innerHTML = orig; }, 2000);
-    }
+        if (done) {
+            var orig = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-check"></i> Copiado!';
+            setTimeout(function(){ btn.innerHTML = orig; }, 2000);
+        }
+    };
 }
 </script>
 HTML;
@@ -266,7 +371,7 @@ HTML;
 
         if (!empty($tx->boleto_url)) {
             $url = htmlspecialchars((string) $tx->boleto_url, ENT_QUOTES, 'UTF-8');
-            $html .= '<a href="' . $url . '" target="_blank" rel="noopener" class="btn btn-primary"'
+            $html .= '<a href="' . $url . '" target="_blank" rel="noopener noreferrer" class="btn btn-primary"'
                   . ' style="margin-top:10px;background:#009ee3;border-color:#009ee3;">'
                   . '<i class="fas fa-download"></i> Baixar Boleto</a>';
         }
@@ -281,38 +386,66 @@ HTML;
 
 /**
  * Renderiza seção PIX no PDF da fatura.
+ *
+ * @param \TCPDF|object $pdf
  */
 function seixastec_mp_addPixToPdf($pdf, object $tx): void
 {
+    $tmpBase = null;
+    $tmpQr   = null;
+
     try {
         $pdf->SetFont('freesans', 'B', 10);
         $pdf->Cell(0, 5, 'PIX', 0, 1, 'L');
 
         $pdf->SetFont('freesans', '', 8);
-        $pdf->MultiCell(0, 4, 'Escaneie o QR Code abaixo ou copie o código PIX:', 0, 'L');
+        $pdf->MultiCell(0, 4, 'Escaneie o QR Code abaixo ou copie o codigo PIX:', 0, 'L');
         $pdf->Ln(2);
 
-        // QR Code
-        $imgBinary = base64_decode((string) $tx->pix_qr_base64, true);
-        if ($imgBinary !== false) {
-            $tmpQr = tempnam(sys_get_temp_dir(), 'mp_qr_') . '.png';
-            if ($tmpQr !== false && file_put_contents($tmpQr, $imgBinary) !== false) {
-                $pdf->Image($tmpQr, $pdf->GetX(), $pdf->GetY(), 35, 35, 'PNG');
-                $pdf->Ln(38);
-                @unlink($tmpQr);
+        // QR Code — validação rigorosa antes de decodificar
+        $base64 = (string) $tx->pix_qr_base64;
+
+        if (seixastec_mp_isValidBase64($base64)) {
+            $imgBinary = base64_decode($base64, true);
+
+            if ($imgBinary !== false && strlen($imgBinary) > 0) {
+                // FIX CRÍTICO 1.1.0: tempnam cria arquivo. Não concatenar .png sem rastrear o original.
+                $tmpBase = tempnam(sys_get_temp_dir(), 'mp_qr_');
+
+                if ($tmpBase !== false) {
+                    $tmpQr = $tmpBase . '.png';
+
+                    if (file_put_contents($tmpQr, $imgBinary) !== false) {
+                        $pdf->Image($tmpQr, $pdf->GetX(), $pdf->GetY(), 35, 35, 'PNG');
+                        $pdf->Ln(38);
+                    }
+                }
             }
         }
 
-        $pdf->SetFont('freemono', '', 7);
-        $pdf->MultiCell(0, 3, (string) $tx->pix_copia_cola, 0, 'L');
+        // Código Copia e Cola (com wordwrap para evitar overflow)
+        $pdf->SetFont('freemono', '', 6);
+        $copiaCola = wordwrap((string) $tx->pix_copia_cola, 80, "\n", true);
+        $pdf->MultiCell(0, 3, $copiaCola, 0, 'L');
         $pdf->Ln(3);
+
     } catch (\Throwable $e) {
-        // não bloqueia a geração do PDF
+        seixastec_mp_log('Erro PDF PIX', $e);
+    } finally {
+        // Garante limpeza dos arquivos temporários (mesmo se houver exception)
+        if ($tmpBase !== null && is_file($tmpBase)) {
+            @unlink($tmpBase);
+        }
+        if ($tmpQr !== null && is_file($tmpQr)) {
+            @unlink($tmpQr);
+        }
     }
 }
 
 /**
  * Renderiza seção Boleto no PDF da fatura.
+ *
+ * @param \TCPDF|object $pdf
  */
 function seixastec_mp_addBoletoToPdf($pdf, object $tx): void
 {
@@ -331,10 +464,15 @@ function seixastec_mp_addBoletoToPdf($pdf, object $tx): void
         if (!empty($tx->boleto_url)) {
             $pdf->SetFont('freesans', '', 8);
             $pdf->SetTextColor(0, 102, 204);
-            $pdf->Cell(0, 4, (string) $tx->boleto_url, 0, 1, 'L', false, (string) $tx->boleto_url);
+            $pdf->Cell(
+                0, 4,
+                (string) $tx->boleto_url,
+                0, 1, 'L', false,
+                (string) $tx->boleto_url
+            );
             $pdf->SetTextColor(0, 0, 0);
         }
     } catch (\Throwable $e) {
-        // não bloqueia a geração do PDF
+        seixastec_mp_log('Erro PDF Boleto', $e);
     }
 }

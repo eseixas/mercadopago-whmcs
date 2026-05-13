@@ -1,0 +1,66 @@
+<?php
+
+/**
+ * Stubs das funcoes globais do WHMCS para analise estatica.
+ * Estes stubs NAO sao executados, apenas usados pelo PHPStan/Psalm.
+ */
+
+/**
+ * Registra chamada de modulo no log do WHMCS.
+ *
+ * @param string $module
+ * @param string $action
+ * @param mixed  $requestString
+ * @param mixed  $responseData
+ * @param mixed  $processedData
+ * @param array<int|string, string> $replaceVars
+ */
+function logModuleCall(
+    string $module,
+    string $action,
+    mixed $requestString,
+    mixed $responseData,
+    mixed $processedData = '',
+    array $replaceVars = []
+): void {}
+
+/**
+ * Registra atividade no log do admin do WHMCS.
+ */
+function logActivity(string $description, int $userid = 0): void {}
+
+/**
+ * Registra transacao no log do gateway.
+ */
+function logTransaction(string $gateway, mixed $data, string $status): void {}
+
+/**
+ * Verifica se um transaction ID ja foi processado (anti-duplicacao).
+ */
+function checkCbTransID(string $transid): bool {}
+
+/**
+ * Adiciona pagamento a uma fatura.
+ *
+ * @param int    $invoiceId
+ * @param string $transid
+ * @param float  $amount
+ * @param float  $fees
+ * @param string $gateway
+ * @param bool   $noemail
+ */
+function addInvoicePayment(
+    int $invoiceId,
+    string $transid,
+    float $amount = 0.0,
+    float $fees = 0.0,
+    string $gateway = '',
+    bool $noemail = false
+): bool {}
+
+/**
+ * Localiza fatura pelo transaction ID.
+ *
+ * @return array{invoiceid: int, userid: int}|false
+ */
+function checkCbInvoiceID(int $invoiceId, string $gateway): array|false {}

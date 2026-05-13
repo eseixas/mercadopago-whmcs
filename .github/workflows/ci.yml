@@ -1,0 +1,366 @@
+# =============================================================================
+# CI/CD Pipeline - Mercado Pago Gateway for WHMCS
+# =============================================================================
+# Documentacao: https://docs.github.com/actions
+#
+# Triggers:
+#   - Push em main/develop
+#   - Pull Requests
+#   - Tags (v*.*.*) -> dispara release automatico
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch: # permite rodar manualmente
+
+# Cancela jobs antigos quando um novo push e feito na mesma PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Permissoes minimas (principio do menor privilegio)
+permissions:
+  contents: read
+
+jobs:
+  # ===========================================================================
+  # 1. LINT - Validacao rapida de sintaxe e estilo
+  # ===========================================================================
+  lint:
+    name: 🎨 Code Style (PHP-CS-Fixer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2, php-cs-fixer
+          coverage: none
+        env:
+          COMPOSER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run PHP-CS-Fixer (dry-run)
+        run: composer cs:check
+
+  # ===========================================================================
+  # 2. STATIC ANALYSIS - PHPStan
+  # ===========================================================================
+  phpstan:
+    name: 🔍 Static Analysis (PHPStan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Cache PHPStan
+        uses: actions/cache@v4
+        with:
+          path: .phpstan.cache
+          key: phpstan-${{ runner.os }}-${{ github.sha }}
+          restore-keys: phpstan-${{ runner.os }}-
+
+      - name: Run PHPStan
+        run: composer phpstan -- --error-format=github --no-progress
+
+  # ===========================================================================
+  # 3. TESTS - PHPUnit Matrix
+  # ===========================================================================
+  tests:
+    name: 🧪 Tests (PHP ${{ matrix.php }} / ${{ matrix.dependency-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+        dependency-version: [prefer-lowest, prefer-stable]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: json, curl, openssl, mbstring, pdo, pdo_mysql, intl, bcmath
+          coverage: pcov
+          ini-values: |
+            memory_limit=512M
+            date.timezone=America/Sao_Paulo
+            error_reporting=-1
+            display_errors=On
+          tools: composer:v2
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ runner.os }}-${{ matrix.php }}-${{ matrix.dependency-version }}-${{ hashFiles('**/composer.json') }}
+          restore-keys: |
+            composer-${{ runner.os }}-${{ matrix.php }}-${{ matrix.dependency-version }}-
+            composer-${{ runner.os }}-${{ matrix.php }}-
+
+      - name: Install dependencies
+        run: |
+          composer update --${{ matrix.dependency-version }} \
+            --prefer-dist --no-progress --no-interaction
+
+      - name: Run tests with coverage
+        run: composer test:coverage
+        env:
+          XDEBUG_MODE: coverage
+
+      - name: Upload coverage to Codecov
+        if: matrix.php == '8.3' && matrix.dependency-version == 'prefer-stable'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./build/coverage/clover.xml
+          flags: unittests
+          name: codecov-mercadopago-whmcs
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-php${{ matrix.php }}-${{ matrix.dependency-version }}
+          path: |
+            build/logs/
+            build/coverage/
+          retention-days: 7
+
+  # ===========================================================================
+  # 4. SECURITY - Composer Audit (CVEs em dependencias)
+  # ===========================================================================
+  security:
+    name: 🔒 Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run Composer audit
+        run: composer audit --no-dev --format=plain
+
+  # ===========================================================================
+  # 5. LINT - YAML, Markdown, JSON
+  # ===========================================================================
+  lint-misc:
+    name: 📝 Lint (YAML / Markdown / JSON)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint YAML files
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: .github/ *.yml *.yaml
+          config_data: |
+            extends: default
+            rules:
+              line-length: disable
+              document-start: disable
+              truthy:
+                check-keys: false
+
+      - name: Lint Markdown files
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: '**/*.md'
+        continue-on-error: true
+
+  # ===========================================================================
+  # 6. EDITORCONFIG - validar formatacao
+  # ===========================================================================
+  editorconfig:
+    name: 📐 EditorConfig
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check EditorConfig compliance
+        uses: editorconfig-checker/action-editorconfig-checker@main
+
+  # ===========================================================================
+  # 7. RELEASE - Build automatico em tags v*.*.*
+  # ===========================================================================
+  release:
+    name: 🚀 Build Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [lint, phpstan, tests, security]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write # necessario para criar release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historico completo para gerar changelog
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install production dependencies
+        run: |
+          composer install \
+            --no-dev \
+            --prefer-dist \
+            --optimize-autoloader \
+            --classmap-authoritative \
+            --no-progress \
+            --no-interaction
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build release ZIP
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          ARCHIVE_NAME="mercadopago-whmcs-${VERSION}.zip"
+
+          # Cria ZIP respeitando .gitattributes (export-ignore)
+          git archive --format=zip --prefix=mercadopago-whmcs/ \
+            -o "${ARCHIVE_NAME}" HEAD
+
+          # Inclui vendor/ (instalado sem dev)
+          zip -r "${ARCHIVE_NAME}" vendor/ -x "vendor/bin/*"
+
+          # Lista conteudo para verificacao
+          unzip -l "${ARCHIVE_NAME}" | head -50
+
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+
+      - name: Generate checksums
+        run: |
+          sha256sum ${{ env.ARCHIVE_NAME }} > ${{ env.ARCHIVE_NAME }}.sha256
+          md5sum    ${{ env.ARCHIVE_NAME }} > ${{ env.ARCHIVE_NAME }}.md5
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          VERSION_NUMBER="${VERSION#v}"
+
+          # Extrai a secao do CHANGELOG.md correspondente a esta versao
+          awk -v ver="$VERSION_NUMBER" '
+            /^## \[/ {
+              if (found) exit;
+              if ($0 ~ "\\["ver"\\]") found=1;
+              next
+            }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+          # Se nao encontrou, usa mensagem padrao
+          if [ ! -s release-notes.md ]; then
+            echo "Release $VERSION" > release-notes.md
+          fi
+
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+          generate_release_notes: true
+          files: |
+            ${{ env.ARCHIVE_NAME }}
+            ${{ env.ARCHIVE_NAME }}.sha256
+            ${{ env.ARCHIVE_NAME }}.md5
+
+  # ===========================================================================
+  # 8. STATUS - Job final que valida o sucesso de todos os anteriores
+  # ===========================================================================
+  ci-success:
+    name: ✅ CI Success
+    runs-on: ubuntu-latest
+    needs: [lint, phpstan, tests, security, lint-misc, editorconfig]
+    if: always()
+
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
+             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "❌ Um ou mais jobs falharam"
+            exit 1
+          fi
+          echo "✅ Todos os jobs passaram com sucesso!"

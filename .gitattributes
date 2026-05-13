@@ -1,0 +1,286 @@
+# =============================================================================
+# .gitattributes - Mercado Pago Gateway for WHMCS
+# =============================================================================
+# O que este arquivo controla:
+#   1. Line endings (LF/CRLF) por tipo de arquivo
+#   2. Deteccao de binarios (evita corrupcao)
+#   3. export-ignore: exclui arquivos do ZIP de `git archive`
+#   4. linguist: classificacao de linguagens no GitHub
+#   5. merge/diff customizado
+#
+# Docs:        https://git-scm.com/docs/gitattributes
+# Mantenedor:  @eseixas
+# Repositorio: https://github.com/eseixas/mercadopago-whmcs
+# =============================================================================
+
+
+# =============================================================================
+# 1. PADRAO GLOBAL
+# =============================================================================
+* text=auto eol=lf
+
+
+# =============================================================================
+# 2. CODIGO-FONTE
+# =============================================================================
+
+# PHP
+*.php          text eol=lf diff=php
+*.phps         text eol=lf diff=php
+*.phtml        text eol=lf diff=php
+*.tpl          text eol=lf linguist-language=Smarty
+
+# HTML / CSS
+*.html         text eol=lf diff=html
+*.htm          text eol=lf diff=html
+*.css          text eol=lf diff=css
+*.scss         text eol=lf diff=css
+*.sass         text eol=lf diff=css
+*.less         text eol=lf diff=css
+*.svg          text eol=lf
+
+# JavaScript / TypeScript
+*.js           text eol=lf
+*.mjs          text eol=lf
+*.cjs          text eol=lf
+*.ts           text eol=lf
+*.tsx          text eol=lf
+*.jsx          text eol=lf
+*.vue          text eol=lf
+
+# Dados / Config
+*.json         text eol=lf
+*.jsonc        text eol=lf
+*.xml          text eol=lf
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.toml         text eol=lf
+*.ini          text eol=lf
+*.conf         text eol=lf
+*.env          text eol=lf
+
+# SQL
+*.sql          text eol=lf
+
+# Shell (sempre LF)
+*.sh           text eol=lf
+*.bash         text eol=lf
+*.zsh          text eol=lf
+
+# Windows scripts (sempre CRLF)
+*.bat          text eol=crlf
+*.cmd          text eol=crlf
+*.ps1          text eol=crlf
+
+
+# =============================================================================
+# 3. DOCUMENTACAO
+# =============================================================================
+*.md           text eol=lf diff=markdown
+*.markdown     text eol=lf diff=markdown
+*.txt          text eol=lf
+
+# Arquivos especiais sem extensao
+LICENSE        text eol=lf
+COPYRIGHT      text eol=lf
+CHANGELOG      text eol=lf
+README         text eol=lf
+AUTHORS        text eol=lf
+CONTRIBUTORS   text eol=lf
+INSTALL        text eol=lf
+NOTICE         text eol=lf
+VERSION        text eol=lf
+
+
+# =============================================================================
+# 4. ARQUIVOS DE PROJETO
+# =============================================================================
+
+# Git
+.gitignore        text eol=lf export-ignore
+.gitattributes    text eol=lf export-ignore
+.gitmodules       text eol=lf export-ignore
+.gitkeep          text eol=lf
+
+# EditorConfig
+.editorconfig     text eol=lf export-ignore
+
+# Composer
+composer.json     text eol=lf
+composer.lock     text eol=lf -diff
+
+# NPM / Yarn / PNPM
+package.json      text eol=lf
+package-lock.json text eol=lf -diff
+yarn.lock         text eol=lf -diff
+pnpm-lock.yaml    text eol=lf -diff
+
+# Apache
+.htaccess         text eol=lf
+.htpasswd         text eol=lf
+
+
+# =============================================================================
+# 5. BINARIOS
+# =============================================================================
+
+# Imagens
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.webp   binary
+*.bmp    binary
+*.tiff   binary
+*.psd    binary
+
+# Fontes
+*.eot    binary
+*.ttf    binary
+*.otf    binary
+*.woff   binary
+*.woff2  binary
+
+# Audio / Video
+*.mp3    binary
+*.mp4    binary
+*.wav    binary
+*.ogg    binary
+*.webm   binary
+*.mov    binary
+
+# Documentos
+*.pdf    binary
+*.doc    binary
+*.docx   binary
+*.xls    binary
+*.xlsx   binary
+*.ppt    binary
+*.pptx   binary
+
+# Compactados
+*.zip    binary
+*.tar    binary
+*.gz     binary
+*.tgz    binary
+*.bz2    binary
+*.7z     binary
+*.rar    binary
+*.xz     binary
+
+# Executaveis / Libs
+*.exe    binary
+*.dll    binary
+*.so     binary
+*.dylib  binary
+*.phar   binary
+*.jar    binary
+
+# Certificados / Chaves (importante p/ gateways)
+*.p12    binary
+*.pfx    binary
+*.cer    binary
+*.der    binary
+
+
+# =============================================================================
+# 6. LINGUIST (classificacao no GitHub)
+# =============================================================================
+
+# Dependencias vendorizadas (nao conta nas stats)
+vendor/**              linguist-vendored
+node_modules/**        linguist-vendored
+public/vendor/**       linguist-vendored
+
+# Documentacao
+*.md                   linguist-documentation
+docs/**                linguist-documentation
+
+# Arquivos gerados (nao conta nas stats)
+*.min.js               linguist-generated
+*.min.css              linguist-generated
+*.map                  linguist-generated
+build/**               linguist-generated
+dist/**                linguist-generated
+coverage/**            linguist-generated
+*.lock                 linguist-generated
+
+
+# =============================================================================
+# 7. EXPORT-IGNORE (exclui do ZIP de release via `git archive`)
+# =============================================================================
+# CRITICO: itens aqui NAO entram no "Source code (zip)" do GitHub
+# nem no ZIP gerado pelo workflow de release.
+# Mantenha apenas o ESSENCIAL para o usuario final.
+
+# Diretorios de dev/CI/docs
+/.github/                       export-ignore
+/.idea/                         export-ignore
+/.vscode/                       export-ignore
+/.devcontainer/                 export-ignore
+/tests/                         export-ignore
+/docs/                          export-ignore
+/build/                         export-ignore
+/scripts/                       export-ignore
+/examples/                      export-ignore
+/benchmarks/                    export-ignore
+
+# Configs de ferramentas de qualidade
+/.php-cs-fixer.dist.php         export-ignore
+/.php-cs-fixer.php              export-ignore
+/.php-cs-fixer.cache            export-ignore
+/.phpunit.cache/                export-ignore
+/.phpunit.result.cache          export-ignore
+/.phpstan.cache/                export-ignore
+/phpstan.neon                   export-ignore
+/phpstan.neon.dist              export-ignore
+/phpstan-baseline.neon          export-ignore
+/phpunit.xml                    export-ignore
+/phpunit.xml.dist               export-ignore
+/psalm.xml                      export-ignore
+/psalm.xml.dist                 export-ignore
+/rector.php                     export-ignore
+/.markdownlint.json             export-ignore
+/.markdownlintrc                export-ignore
+
+# Documentos de processo
+/CONTRIBUTING.md                export-ignore
+/CODE_OF_CONDUCT.md             export-ignore
+/SECURITY.md                    export-ignore
+/PULL_REQUEST_TEMPLATE.md       export-ignore
+/ISSUE_TEMPLATE.md              export-ignore
+/UPGRADE.md                     export-ignore
+
+# Docker (dev local)
+/Dockerfile                     export-ignore
+/Dockerfile.*                   export-ignore
+/docker-compose.yml             export-ignore
+/docker-compose.*.yml           export-ignore
+/.dockerignore                  export-ignore
+
+# Outros
+/Makefile                       export-ignore
+/.env.example                   export-ignore
+/.env.testing                   export-ignore
+*.log                           export-ignore
+
+
+# =============================================================================
+# 8. MERGE / DIFF CUSTOMIZADO
+# =============================================================================
+
+# CHANGELOG: union merge (combina ambos os lados, evita conflitos)
+CHANGELOG.md       merge=union
+CHANGELOG          merge=union
+
+# Lock files: ocultar diff (muito ruidosos)
+composer.lock      -diff
+package-lock.json  -diff
+yarn.lock          -diff
+pnpm-lock.yaml     -diff
+
+# Minified e maps: ocultar diff
+*.min.js           -diff
+*.min.css          -diff
+*.map              -diff

@@ -1,0 +1,211 @@
+# =============================================================================
+# .editorconfig - Mercado Pago Gateway for WHMCS
+# =============================================================================
+# Define padroes de formatacao consistentes entre IDEs e editores.
+# Documentacao: https://editorconfig.org
+#
+# Mantenedor:  @eseixas
+# Repositorio: https://github.com/eseixas/mercadopago-whmcs
+# =============================================================================
+
+# Arquivo raiz - para de procurar .editorconfig em diretorios pais
+root = true
+
+
+# -----------------------------------------------------------------------------
+# Padrao global - aplica a TODOS os arquivos
+# -----------------------------------------------------------------------------
+[*]
+charset                  = utf-8
+end_of_line              = lf
+indent_style             = space
+indent_size              = 4
+insert_final_newline     = true
+trim_trailing_whitespace = true
+max_line_length          = 120
+
+
+# -----------------------------------------------------------------------------
+# PHP - PSR-12 (padrao oficial PHP-FIG)
+# -----------------------------------------------------------------------------
+[*.php]
+indent_style             = space
+indent_size              = 4
+max_line_length          = 120
+
+# Arquivos de stub / fixtures podem ter linhas longas
+[tests/**/fixtures/**.php]
+max_line_length          = off
+
+
+# -----------------------------------------------------------------------------
+# Templates Smarty (WHMCS)
+# -----------------------------------------------------------------------------
+[*.tpl]
+indent_style             = space
+indent_size              = 2
+max_line_length          = off
+
+
+# -----------------------------------------------------------------------------
+# HTML / XML
+# -----------------------------------------------------------------------------
+[*.{html,htm,xml,xhtml,xsl,xslt}]
+indent_style             = space
+indent_size              = 2
+max_line_length          = off
+
+# Arquivos XML de configuracao (PHPUnit, PHPStan, etc.)
+[{phpunit.xml,phpunit.xml.dist,phpstan.neon,psalm.xml}]
+indent_style             = space
+indent_size              = 4
+
+
+# -----------------------------------------------------------------------------
+# CSS / SCSS / LESS
+# -----------------------------------------------------------------------------
+[*.{css,scss,sass,less,styl}]
+indent_style             = space
+indent_size              = 2
+
+
+# -----------------------------------------------------------------------------
+# JavaScript / TypeScript / JSON
+# -----------------------------------------------------------------------------
+[*.{js,mjs,cjs,jsx,ts,tsx,vue}]
+indent_style             = space
+indent_size              = 2
+max_line_length          = 100
+
+[*.{json,jsonc,json5}]
+indent_style             = space
+indent_size              = 2
+insert_final_newline     = false
+
+# package.json sempre 2 espacos (padrao npm)
+[{package.json,package-lock.json,composer.json}]
+indent_style             = space
+indent_size              = 2
+
+
+# -----------------------------------------------------------------------------
+# YAML (CI/CD, Docker Compose, etc.)
+# -----------------------------------------------------------------------------
+[*.{yml,yaml}]
+indent_style             = space
+indent_size              = 2
+
+# GitHub Actions e workflows
+[.github/**.{yml,yaml}]
+indent_style             = space
+indent_size              = 2
+
+
+# -----------------------------------------------------------------------------
+# Markdown - permitir whitespace no final (quebra de linha forcada)
+# -----------------------------------------------------------------------------
+[*.{md,markdown,mdx}]
+indent_style             = space
+indent_size              = 4
+trim_trailing_whitespace = false
+max_line_length          = off
+
+
+# -----------------------------------------------------------------------------
+# Shell scripts
+# -----------------------------------------------------------------------------
+[*.{sh,bash,zsh,fish}]
+indent_style             = space
+indent_size              = 4
+end_of_line              = lf
+
+# Scripts Windows mantem CRLF
+[*.{bat,cmd,ps1}]
+end_of_line              = crlf
+indent_style             = space
+indent_size              = 4
+
+
+# -----------------------------------------------------------------------------
+# SQL
+# -----------------------------------------------------------------------------
+[*.sql]
+indent_style             = space
+indent_size              = 4
+max_line_length          = off
+
+
+# -----------------------------------------------------------------------------
+# Dockerfile / .dockerignore
+# -----------------------------------------------------------------------------
+[{Dockerfile,Dockerfile.*,*.dockerfile}]
+indent_style             = space
+indent_size              = 4
+
+[.dockerignore]
+indent_style             = space
+indent_size              = 2
+
+
+# -----------------------------------------------------------------------------
+# Makefile - OBRIGATORIO usar tab (nao espaco)
+# -----------------------------------------------------------------------------
+[{Makefile,makefile,GNUmakefile,*.mk}]
+indent_style             = tab
+indent_size              = 4
+
+
+# -----------------------------------------------------------------------------
+# Arquivos Git
+# -----------------------------------------------------------------------------
+[{.gitignore,.gitattributes,.gitmodules,.gitconfig}]
+indent_style             = space
+indent_size              = 2
+
+# Mensagens de commit
+[COMMIT_EDITMSG]
+max_line_length          = 72
+
+
+# -----------------------------------------------------------------------------
+# Configuracoes diversas
+# -----------------------------------------------------------------------------
+
+# .env files
+[.env*]
+indent_style             = space
+indent_size              = 4
+insert_final_newline     = true
+
+# Arquivos INI / CONF
+[*.{ini,conf,cnf,toml}]
+indent_style             = space
+indent_size              = 4
+
+# Arquivos Apache / Nginx
+[{.htaccess,*.conf,nginx.conf}]
+indent_style             = space
+indent_size              = 4
+
+# LICENSE / COPYRIGHT / README sem extensao
+[{LICENSE,COPYRIGHT,AUTHORS,CONTRIBUTORS,CHANGELOG,README,INSTALL,NOTICE}]
+indent_style             = space
+indent_size              = 4
+max_line_length          = off
+
+
+# -----------------------------------------------------------------------------
+# Excecoes - arquivos que NAO devem ser tocados pelo editor
+# -----------------------------------------------------------------------------
+
+# Snapshots de teste (formato preservado)
+[**/__snapshots__/**]
+trim_trailing_whitespace = false
+insert_final_newline     = false
+
+# Arquivos binarios e gerados (defensivo)
+[*.{min.js,min.css,map}]
+indent_style             = ignore
+indent_size              = ignore
+trim_trailing_whitespace = false
+insert_final_newline     = false
