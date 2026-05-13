@@ -59,15 +59,12 @@
     },
     "autoload": {
         "psr-4": {
-            "Eseixas\\MercadoPagoWhmcs\\": "src/"
-        },
-        "files": [
-            "src/helpers/functions.php"
-        ]
+            "WHMCS\\Module\\Gateway\\SeixastecMercadoPago\\": "modules/gateways/seixastec_mercadopago/"
+        }
     },
     "autoload-dev": {
         "psr-4": {
-            "Eseixas\\MercadoPagoWhmcs\\Tests\\": "tests/"
+            "WHMCS\\Module\\Gateway\\SeixastecMercadoPago\\Tests\\": "tests/"
         }
     },
     "scripts": {

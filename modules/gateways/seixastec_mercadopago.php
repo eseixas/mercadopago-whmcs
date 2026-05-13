@@ -35,145 +35,7 @@ require_once __DIR__ . '/seixastec_mercadopago/Api.php';
 
 use WHMCS\Module\Gateway\SeixastecMercadoPago\TemplateRenderer;
 
-require_once __DIR__ . '/seixastec_mercadopago/Api.php';
 require_once __DIR__ . '/seixastec_mercadopago/TemplateRenderer.php';
-
-// ==================== SUBSTITUA estas funções ====================
-
-function _seixastec_mp_alert(string $type, string $message, string $icon = ''): string
-{
-    return TemplateRenderer::render('alert', [
-        'type'    => in_array($type, ['success','info','warning','danger'], true) ? $type : 'info',
-        'message' => $message,
-        'icon'    => $icon,
-    ]);
-}
-
-function _seixastec_mp_render_checkout_pro(Api $api, array $params, float $amount): string
-{
-    $preference = _seixastec_mp_build_preference($params, $amount);
-    $result     = $api->createPreference($preference);
-
-    if ($result === null || empty($result['init_point'])) {
-        return _seixastec_mp_alert('danger',
-            'Falha ao criar preferência: ' . htmlspecialchars((string) $api->getLastError()),
-            '❌'
-        );
-    }
-
-    $isSandbox = $api->isSandbox();
-    $url = $isSandbox && !empty($result['sandbox_init_point'])
-        ? $result['sandbox_init_point']
-        : $result['init_point'];
-
-    return TemplateRenderer::render('assets')
-        . TemplateRenderer::render('checkout_pro', [
-            'url'       => $url,
-            'label'     => $params['displayName'] ?? 'Pagar com Mercado Pago',
-            'isSandbox' => $isSandbox,
-        ]);
-}
-
-function _seixastec_mp_pix_html(array $payment, array $params): string
-{
-    $qrBase64 = $payment['point_of_interaction']['transaction_data']['qr_code_base64'] ?? '';
-    $qrCode   = $payment['point_of_interaction']['transaction_data']['qr_code']        ?? '';
-    $expires  = $payment['date_of_expiration'] ?? null;
-
-    if ($qrCode === '') {
-        return _seixastec_mp_alert('warning', 'QR Code Pix indisponível. Recarregue a página.', '⚠️');
-    }
-
-    $expiresFormatted = '';
-    if ($expires) {
-        try {
-            $expiresFormatted = (new \DateTimeImmutable($expires))->format('d/m/Y H:i');
-        } catch (\Throwable $e) { /* ignora */ }
-    }
-
-    return TemplateRenderer::render('assets')
-        . TemplateRenderer::render('pix', [
-            'qrCodeBase64' => $qrBase64,
-            'qrCode'       => $qrCode,
-            'expiresAt'    => $expiresFormatted,
-            'invoiceId'    => $params['invoiceid'] ?? 'main',
-            'autoRefresh'  => 15,
-        ]);
-}
-
-function _seixastec_mp_boleto_html(array $payment): string
-{
-    $url     = $payment['transaction_details']['external_resource_url'] ?? '';
-    $barcode = $payment['barcode']['content'] ?? '';
-    $expires = $payment['date_of_expiration'] ?? null;
-
-    if ($url === '') {
-        return _seixastec_mp_alert('warning', 'Boleto indisponível. Recarregue a página.', '⚠️');
-    }
-
-    $expiresFormatted = '';
-    if ($expires) {
-        try {
-            $expiresFormatted = (new \DateTimeImmutable($expires))->format('d/m/Y');
-        } catch (\Throwable $e) { /* ignora */ }
-    }
-
-    return TemplateRenderer::render('assets')
-        . TemplateRenderer::render('boleto', [
-            'url'       => $url,
-            'barcode'   => $barcode,
-            'expiresAt' => $expiresFormatted,
-        ]);
-}
-
-function _seixastec_mp_render_pix_boleto(Api $api, array $params, float $amount): string
-{
-    $choice = $_GET['mp_method'] ?? null;
-
-    if ($choice === 'pix') {
-        return _seixastec_mp_render_pix($api, $params, $amount);
-    }
-    if ($choice === 'boleto') {
-        return _seixastec_mp_render_boleto($api, $params, $amount);
-    }
-
-    $invoiceId = (int) $params['invoiceid'];
-    $systemUrl = rtrim((string) $params['systemurl'], '/');
-    $base      = "{$systemUrl}/viewinvoice.php?id={$invoiceId}";
-
-    return TemplateRenderer::render('assets')
-        . TemplateRenderer::render('choice', [
-            'pixUrl'    => "{$base}&mp_method=pix",
-            'boletoUrl' => "{$base}&mp_method=boleto",
-        ]);
-}
-
-function _seixastec_mp_render_existing(array $payment, array $params): ?string
-{
-    $status = $payment['status'] ?? '';
-
-    if ($status === 'approved') {
-        return TemplateRenderer::render('existing_approved', [
-            'paymentId' => $payment['id'] ?? '',
-        ]);
-    }
-
-    if (in_array($status, ['pending', 'in_process'], true)
-        && ($payment['payment_method_id'] ?? '') === 'pix'
-        && !empty($payment['point_of_interaction']['transaction_data']['qr_code'])
-    ) {
-        return _seixastec_mp_pix_html($payment, $params);
-    }
-
-    if (in_array($status, ['pending', 'in_process'], true)
-        && in_array($payment['payment_method_id'] ?? '', ['bolbradesco', 'boleto'], true)
-        && !empty($payment['transaction_details']['external_resource_url'])
-    ) {
-        return _seixastec_mp_boleto_html($payment);
-    }
-
-    return null;
-}
 
 // =============================================================================
 // METADATA
@@ -503,14 +365,12 @@ function _seixastec_mp_render_existing(array $payment, array $params): ?string
 {
     $status = $payment['status'] ?? '';
 
-    // Aprovado → mensagem de sucesso
     if ($status === 'approved') {
-        return _seixastec_mp_alert('success',
-            '✅ Pagamento aprovado! Em instantes a fatura será marcada como paga automaticamente.'
-        );
+        return TemplateRenderer::render('existing_approved', [
+            'paymentId' => $payment['id'] ?? '',
+        ]);
     }
 
-    // Pix pendente → renderiza QR Code existente
     if (in_array($status, ['pending', 'in_process'], true)
         && ($payment['payment_method_id'] ?? '') === 'pix'
         && !empty($payment['point_of_interaction']['transaction_data']['qr_code'])
@@ -518,7 +378,6 @@ function _seixastec_mp_render_existing(array $payment, array $params): ?string
         return _seixastec_mp_pix_html($payment, $params);
     }
 
-    // Boleto pendente
     if (in_array($status, ['pending', 'in_process'], true)
         && in_array($payment['payment_method_id'] ?? '', ['bolbradesco', 'boleto'], true)
         && !empty($payment['transaction_details']['external_resource_url'])
@@ -538,27 +397,22 @@ function _seixastec_mp_render_checkout_pro(Api $api, array $params, float $amoun
 
     if ($result === null || empty($result['init_point'])) {
         return _seixastec_mp_alert('danger',
-            'Falha ao criar preferência de pagamento: ' . htmlspecialchars((string) $api->getLastError())
+            'Falha ao criar preferência: ' . htmlspecialchars((string) $api->getLastError()),
+            '❌'
         );
     }
 
     $isSandbox = $api->isSandbox();
-    $url       = $isSandbox && !empty($result['sandbox_init_point'])
+    $url = $isSandbox && !empty($result['sandbox_init_point'])
         ? $result['sandbox_init_point']
         : $result['init_point'];
 
-    $btnLabel = htmlspecialchars($params['displayName'] ?? 'Pagar com Mercado Pago');
-
-    return <<<HTML
-<div class="seixastec-mp-checkout text-center">
-    <a href="{$url}" target="_blank" class="btn btn-primary btn-lg">
-        <i class="fa fa-credit-card"></i> {$btnLabel}
-    </a>
-    <p class="text-muted small" style="margin-top:10px;">
-        Você será redirecionado ao ambiente seguro do Mercado Pago.
-    </p>
-</div>
-HTML;
+    return TemplateRenderer::render('assets')
+        . TemplateRenderer::render('checkout_pro', [
+            'url'       => $url,
+            'label'     => $params['displayName'] ?? 'Pagar com Mercado Pago',
+            'isSandbox' => $isSandbox,
+        ]);
 }
 
 function _seixastec_mp_build_preference(array $params, float $amount): array
@@ -657,56 +511,24 @@ function _seixastec_mp_pix_html(array $payment, array $params): string
     $expires  = $payment['date_of_expiration'] ?? null;
 
     if ($qrCode === '') {
-        return _seixastec_mp_alert('warning', 'QR Code Pix indisponível no momento. Recarregue a página.');
+        return _seixastec_mp_alert('warning', 'QR Code Pix indisponível. Recarregue a página.', '⚠️');
     }
 
-    $qrCodeEsc = htmlspecialchars($qrCode);
-    $expiresHtml = '';
+    $expiresFormatted = '';
     if ($expires) {
         try {
-            $dt = new \DateTimeImmutable($expires);
-            $expiresHtml = '<p class="text-muted small">Válido até <strong>' . $dt->format('d/m/Y H:i') . '</strong></p>';
-        } catch (\Throwable $e) {
-            // ignora
-        }
+            $expiresFormatted = (new \DateTimeImmutable($expires))->format('d/m/Y H:i');
+        } catch (\Throwable $e) { /* ignora */ }
     }
 
-    return <<<HTML
-<div class="seixastec-mp-pix text-center" style="padding:15px;">
-    <h4>💸 Pague com Pix</h4>
-    <p class="text-muted">Aponte a câmera do app do seu banco ou copie o código abaixo:</p>
-
-    <div style="margin:20px 0;">
-        <img src="data:image/png;base64,{$qrBase64}"
-             alt="QR Code Pix"
-             style="max-width:280px; border:1px solid #ddd; padding:10px; background:#fff;">
-    </div>
-
-    <div class="input-group" style="max-width:500px; margin:0 auto;">
-        <input type="text" id="seixastec-pix-code" class="form-control"
-               value="{$qrCodeEsc}" readonly onclick="this.select();">
-        <span class="input-group-btn">
-            <button type="button" class="btn btn-success"
-                    onclick="navigator.clipboard.writeText(document.getElementById('seixastec-pix-code').value); this.innerHTML='✓ Copiado!';">
-                <i class="fa fa-copy"></i> Copiar
-            </button>
-        </span>
-    </div>
-
-    {$expiresHtml}
-
-    <p class="text-muted small" style="margin-top:15px;">
-        Após o pagamento, esta página será atualizada automaticamente.
-    </p>
-</div>
-
-<script>
-(function () {
-    // Auto-refresh a cada 15s para detectar pagamento
-    setTimeout(function () { window.location.reload(); }, 15000);
-})();
-</script>
-HTML;
+    return TemplateRenderer::render('assets')
+        . TemplateRenderer::render('pix', [
+            'qrCodeBase64' => $qrBase64,
+            'qrCode'       => $qrCode,
+            'expiresAt'    => $expiresFormatted,
+            'invoiceId'    => $params['invoiceid'] ?? 'main',
+            'autoRefresh'  => 15,
+        ]);
 }
 
 // ----- BOLETO -----
@@ -791,28 +613,25 @@ function _seixastec_mp_boleto_html(array $payment): string
 {
     $url     = $payment['transaction_details']['external_resource_url'] ?? '';
     $barcode = $payment['barcode']['content'] ?? '';
+    $expires = $payment['date_of_expiration'] ?? null;
 
     if ($url === '') {
-        return _seixastec_mp_alert('warning', 'Boleto indisponível. Recarregue a página em alguns segundos.');
+        return _seixastec_mp_alert('warning', 'Boleto indisponível. Recarregue a página.', '⚠️');
     }
 
-    $urlEsc     = htmlspecialchars($url);
-    $barcodeEsc = htmlspecialchars($barcode);
+    $expiresFormatted = '';
+    if ($expires) {
+        try {
+            $expiresFormatted = (new \DateTimeImmutable($expires))->format('d/m/Y');
+        } catch (\Throwable $e) { /* ignora */ }
+    }
 
-    return <<<HTML
-<div class="seixastec-mp-boleto text-center" style="padding:15px;">
-    <h4>📄 Boleto Bancário Gerado</h4>
-    <p class="text-muted">Clique no botão abaixo para visualizar e imprimir seu boleto:</p>
-
-    <a href="{$urlEsc}" target="_blank" class="btn btn-primary btn-lg">
-        <i class="fa fa-barcode"></i> Visualizar Boleto
-    </a>
-
-    <p class="text-muted small" style="margin-top:20px;">
-        Após o pagamento, a compensação pode levar até 2 dias úteis.
-    </p>
-</div>
-HTML;
+    return TemplateRenderer::render('assets')
+        . TemplateRenderer::render('boleto', [
+            'url'       => $url,
+            'barcode'   => $barcode,
+            'expiresAt' => $expiresFormatted,
+        ]);
 }
 
 // ----- PIX + BOLETO (cliente escolhe) -----
@@ -828,35 +647,24 @@ function _seixastec_mp_render_pix_boleto(Api $api, array $params, float $amount)
         return _seixastec_mp_render_boleto($api, $params, $amount);
     }
 
-    $invoiceId  = (int) $params['invoiceid'];
-    $systemUrl  = rtrim((string) $params['systemurl'], '/');
-    $base       = "{$systemUrl}/viewinvoice.php?id={$invoiceId}";
+    $invoiceId = (int) $params['invoiceid'];
+    $systemUrl = rtrim((string) $params['systemurl'], '/');
+    $base      = "{$systemUrl}/viewinvoice.php?id={$invoiceId}";
 
-    return <<<HTML
-<div class="seixastec-mp-choice text-center" style="padding:20px;">
-    <h4>Escolha como deseja pagar:</h4>
-    <div style="margin-top:20px;">
-        <a href="{$base}&mp_method=pix" class="btn btn-success btn-lg" style="margin:5px;">
-            💸 Pix (instantâneo)
-        </a>
-        <a href="{$base}&mp_method=boleto" class="btn btn-primary btn-lg" style="margin:5px;">
-            📄 Boleto Bancário
-        </a>
-    </div>
-</div>
-HTML;
+    return TemplateRenderer::render('assets')
+        . TemplateRenderer::render('choice', [
+            'pixUrl'    => "{$base}&mp_method=pix",
+            'boletoUrl' => "{$base}&mp_method=boleto",
+        ]);
 }
 
 // ----- UI HELPERS -----
 
-function _seixastec_mp_alert(string $type, string $message): string
+function _seixastec_mp_alert(string $type, string $message, string $icon = ''): string
 {
-    $allowed = ['success', 'info', 'warning', 'danger'];
-    $type    = in_array($type, $allowed, true) ? $type : 'info';
-
-    return <<<HTML
-<div class="alert alert-{$type}" style="margin:15px 0;">
-    {$message}
-</div>
-HTML;
+    return TemplateRenderer::render('alert', [
+        'type'    => in_array($type, ['success','info','warning','danger'], true) ? $type : 'info',
+        'message' => $message,
+        'icon'    => $icon,
+    ]);
 }

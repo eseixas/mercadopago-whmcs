@@ -107,9 +107,7 @@ if (empty($gateway['type'])) {
 }
 
 $sandboxMode = ($gateway['sandboxMode'] ?? '') === 'on';
-$accessToken = $sandboxMode
-    ? ($gateway['accessTokenSandbox'] ?? '')
-    : ($gateway['accessTokenProd'] ?? '');
+$accessToken = trim((string) ($gateway['accessToken'] ?? ''));
 
 if (empty($accessToken)) {
     respond(false, 'Credenciais não configuradas.', [], 503);

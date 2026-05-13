@@ -39,12 +39,8 @@ if (empty($gateway['type'])) {
 }
 
 $sandboxMode = ($gateway['sandboxMode'] ?? '') === 'on';
-$accessToken = $sandboxMode
-    ? ($gateway['accessTokenSandbox'] ?? '')
-    : ($gateway['accessTokenProd'] ?? '');
-$publicKey = $sandboxMode
-    ? ($gateway['publicKeySandbox'] ?? '')
-    : ($gateway['publicKeyProd'] ?? '');
+$accessToken = trim((string) ($gateway['accessToken'] ?? ''));
+$publicKey = trim((string) ($gateway['publicKey'] ?? ''));
 
 if (empty($accessToken) || empty($publicKey)) {
     http_response_code(503);
