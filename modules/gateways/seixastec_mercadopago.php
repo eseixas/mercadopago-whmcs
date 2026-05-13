@@ -683,3 +683,71 @@ function seixastec_mercadopago_renderError(string $title, string $message): stri
         htmlspecialchars($message, ENT_QUOTES, 'UTF-8')
     );
 }
+
+/**
+ * Ativação do módulo Mercado Pago
+ */
+function seixastec_mercadopago_activate(): array
+{
+    try {
+        if (!Capsule::schema()->hasTable('mod_seixastec_mp_transactions')) {
+            Capsule::schema()->create('mod_seixastec_mp_transactions', function ($table) {
+                $table->increments('id');
+                $table->unsignedInteger('invoice_id')->unique();
+                $table->string('preference_id', 100)->nullable();
+                $table->string('payment_id', 100)->nullable();
+                $table->string('method', 50)->nullable();
+                $table->string('status', 30)->default('pending');
+                $table->longText('pix_qr_base64')->nullable();
+                $table->text('pix_copia_cola')->nullable();
+                $table->string('boleto_url', 255)->nullable();
+                $table->string('boleto_linha', 100)->nullable();
+                $table->decimal('amount', 10, 2)->nullable();
+                $table->timestamp('created_at')->useCurrent();
+                $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
+            });
+        }
+
+        return [
+            'status'      => 'success',
+            'description' => 'Módulo Mercado Pago ativado com sucesso. Tabela auxiliar criada.',
+        ];
+    } catch (\Exception $e) {
+        return [
+            'status'      => 'error',
+            'description' => 'Erro ao criar tabela: ' . $e->getMessage(),
+        ];
+    }
+}
+
+/**
+ * Atualiza os dados de PIX e Boleto na tabela após confirmação do pagamento
+ * Melhoria importante para o hook do PDF e e-mails
+ */
+function seixastec_mercadopago_updateTransactionWithPaymentDetails(int $invoiceId, array $paymentData): void
+{
+    try {
+        $pixQrBase64  = $paymentData['point_of_interaction']['transaction_data']['qr_code_base64'] ?? null;
+        $pixCopiaCola = $paymentData['point_of_interaction']['transaction_data']['qr_code'] ?? null;
+
+        $boletoUrl   = $paymentData['transaction_details']['external_resource_url'] ?? null;
+        $boletoLinha = $paymentData['transaction_details']['digitable_line'] ?? null;
+
+        Capsule::table('mod_seixastec_mp_transactions')
+            ->where('invoice_id', $invoiceId)
+            ->update([
+                'payment_id'       => $paymentData['id'] ?? null,
+                'method'           => $paymentData['payment_method_id'] ?? null,
+                'status'           => $paymentData['status'] ?? 'pending',
+                'pix_qr_base64'    => $pixQrBase64,
+                'pix_copia_cola'   => $pixCopiaCola,
+                'boleto_url'       => $boletoUrl,
+                'boleto_linha'     => $boletoLinha,
+                'updated_at'       => date('Y-m-d H:i:s'),
+            ]);
+    } catch (\Throwable $e) {
+        if (function_exists('logActivity')) {
+            logActivity('[Mercado Pago] Erro ao atualizar dados PIX/Boleto da fatura #' . $invoiceId . ': ' . $e->getMessage());
+        }
+    }
+}

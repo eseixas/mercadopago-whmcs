@@ -25,3 +25,7 @@ _mp_diag.php
 # Backup files
 *.bak
 *.orig
+
+# Agent / Tooling
+.agents/
+skills-lock.json

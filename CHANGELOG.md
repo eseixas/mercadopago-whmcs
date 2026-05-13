@@ -8,6 +8,23 @@
 - Atualizado badge de versão para **1.6.0** no cabeçalho.
 - Acrescentadas novas linhas na seção **Segurança** documentando HMAC-SHA256, file lock e escape de variáveis.
 
+## [2.2.0] - 2026-05-12
+
+### Melhorado
+- **`modules/gateways/callback/seixastec_mercadopago.php`**: 
+  - Função `mp_update_transaction_data()` validada e otimizada para extração correta de dados de **PIX** (QR Code + Copia e Cola) e **Boleto** (URL + linha digitável).
+  - Fluxo de persistência de dados da transação agora é chamado de forma mais clara e no momento correto (após validação da fatura).
+  - Melhor tratamento de casos onde o método de pagamento é PIX ou Boleto.
+
+- **Revisão técnica completa do módulo**:
+  - Confirmado que a lógica de salvamento de dados PIX/Boleto já estava bem implementada no webhook.
+  - Reforçada a importância da criação automática da tabela `mod_seixastec_mp_transactions`.
+  - Adicionada recomendação de função `_activate()` no gateway principal como camada adicional de garantia (além do hook de instalação existente).
+
+### Documentação
+- Atualizado processo de revisão e melhorias no fluxo de dados entre webhook e hook do PDF/e-mail.
+- Reforçada documentação interna sobre o local exato de atualização dos dados de pagamento.
+
 ## [2.1.1] - 2026-05-11
 
 ### Corrigido
