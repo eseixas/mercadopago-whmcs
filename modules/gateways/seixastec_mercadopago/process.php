@@ -176,7 +176,7 @@ $idempotencyKey = sprintf(
     'inv-%d-%s-%s',
     $invoiceId,
     substr(preg_replace('/[^a-z0-9]/i', '', $selectedPaymentType), 0, 16) ?: 'unknown',
-    substr(md5((string) $amount), 0, 10)
+    substr(hash('sha256', (string) $amount), 0, 10)
 );
 
 // ---------------------------------------------------------------------------
@@ -271,8 +271,15 @@ try {
 
     // ---- BOLETO ----
     if (in_array($paymentTypeNormalized, ['ticket', 'bolbradesco', 'pec'], true)) {
+        // VULN-05 FIX: Whitelist de métodos de boleto permitidos
+        $allowedTicketMethods = ['bolbradesco', 'pec'];
+        $requestedMethod = (string) ($formData['payment_method_id'] ?? 'bolbradesco');
+        if (!in_array($requestedMethod, $allowedTicketMethods, true)) {
+            respond(false, 'Método de boleto não suportado.', [], 400);
+        }
+
         $payload = array_merge($basePayload, [
-            'payment_method_id' => $formData['payment_method_id'] ?? 'bolbradesco',
+            'payment_method_id' => $requestedMethod,
         ]);
 
         // Boleto exige endereço — tenta enriquecer com dados do cliente
@@ -370,9 +377,11 @@ try {
     respond(false, 'Método de pagamento não suportado: ' . $selectedPaymentType, [], 400);
 
 } catch (Throwable $e) {
+    // VULN-15 FIX: Não logar stack trace completo (revela caminhos internos)
     mpLog('process_exception', $input, [
         'message' => $e->getMessage(),
-        'trace'   => $e->getTraceAsString(),
+        'file'    => basename($e->getFile()),
+        'line'    => $e->getLine(),
     ]);
     respond(false, 'Erro interno ao processar pagamento.', [], 500);
 }

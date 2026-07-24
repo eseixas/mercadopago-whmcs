@@ -303,7 +303,7 @@ function seixastec_mp_migration_v2_addIndexes(): void
 function seixastec_mp_getExistingIndexes(string $tableName): array
 {
     try {
-        $rows = Capsule::select("SHOW INDEX FROM `{$tableName}`");
+        $rows = Capsule::select("SHOW INDEX FROM `" . SEIXASTEC_MP_TABLE . "`");
         $names = [];
         foreach ($rows as $row) {
             $names[] = (string) ($row->Key_name ?? '');

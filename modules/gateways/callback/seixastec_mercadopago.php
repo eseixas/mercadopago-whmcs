@@ -102,35 +102,40 @@ if (!is_array($payload)) {
 $headers = _seixastec_mp_get_headers();
 
 if ($debugLog) {
+    // Remove headers sensíveis antes de logar
+    $safeHeaders = array_diff_key($headers, array_flip([
+        'authorization', 'cookie', 'x-signature', 'set-cookie',
+    ]));
+    $safeQuery = array_diff_key($_GET, array_flip(['token', 'access_token']));
     $log('Webhook RECEIVED', [
-        'headers' => $headers,
-        'query'   => $_GET,
+        'headers' => $safeHeaders,
+        'query'   => $safeQuery,
         'body'    => $payload,
-        'raw'     => $rawBody,
     ]);
 }
 
 // =============================================================================
-// VALIDAÇÃO DE ASSINATURA HMAC (x-signature)
+// VALIDAÇÃO DE ASSINATURA HMAC (x-signature) — OBRIGATÓRIA
 // =============================================================================
 
-if ($webhookSecret !== '') {
-    $signatureHeader = $headers['x-signature']  ?? '';
-    $requestIdHeader = $headers['x-request-id'] ?? '';
-    $dataId          = $_GET['data.id'] ?? $_GET['id'] ?? ($payload['data']['id'] ?? '');
+if ($webhookSecret === '') {
+    $log('Webhook BLOCKED', 'Webhook Secret não configurado. Recusando requisição por segurança.');
+    http_response_code(503);
+    exit('Webhook secret not configured');
+}
 
-    if (!_seixastec_mp_validate_signature($signatureHeader, $requestIdHeader, (string) $dataId, $webhookSecret)) {
-        $log('Webhook SIGNATURE INVALID', [
-            'x-signature'  => $signatureHeader,
-            'x-request-id' => $requestIdHeader,
-            'data.id'      => $dataId,
-        ]);
-        http_response_code(401);
-        exit('Invalid signature');
-    }
-} else {
-    // Em produção sem secret é arriscado; loga aviso mas processa
-    $log('Webhook WARNING', 'Webhook Secret não configurado - validação HMAC desabilitada.');
+$signatureHeader = $headers['x-signature']  ?? '';
+$requestIdHeader = $headers['x-request-id'] ?? '';
+$dataId          = $_GET['data.id'] ?? $_GET['id'] ?? ($payload['data']['id'] ?? '');
+
+if (!_seixastec_mp_validate_signature($signatureHeader, $requestIdHeader, (string) $dataId, $webhookSecret)) {
+    $log('Webhook SIGNATURE INVALID', [
+        'x-signature'  => $signatureHeader,
+        'x-request-id' => $requestIdHeader,
+        'data.id'      => $dataId,
+    ]);
+    http_response_code(401);
+    exit('Invalid signature');
 }
 
 // =============================================================================
@@ -241,77 +246,125 @@ function _seixastec_mp_process_payment(Api $api, string $paymentId, array $gatew
         return;
     }
 
-    // Verifica duplicação (impede pagamento duplicado para o mesmo transid)
-    checkCbTransID($paymentId);
-
-    $fee = (float) ($payment['fee_details'][0]['amount'] ?? 0);
-
-    $log('Webhook PROCESS', [
-        'payment_id'         => $paymentId,
-        'status'             => $status,
-        'invoice_id'         => $invoiceId,
-        'amount'             => $amount,
-        'amount_refunded'    => $amountRefunded,
-        'payment_method'     => $paymentMethod,
-        'payment_type'       => $paymentType,
-        'fee'                => $fee,
-    ]);
-
-    switch ($status) {
-        case 'approved':
-            addInvoicePayment(
-                $invoiceId,        // invoice id
-                $paymentId,        // transaction id
-                $amount,           // valor pago
-                $fee,              // taxa do gateway
-                $gateway['name']   // gateway module
-            );
-            logTransaction($gateway['name'], $payment, "Aprovado ({$paymentMethod})");
-            break;
-
-        case 'refunded':
-            logTransaction($gateway['name'], $payment, "Reembolso TOTAL processado ({$amount})");
-            _seixastec_mp_add_invoice_note(
-                $invoiceId,
-                "Reembolso TOTAL via Mercado Pago. Payment ID: {$paymentId}. Valor: R$ " . number_format($amount, 2, ',', '.')
-            );
-            break;
-
-        case 'charged_back':
-            logTransaction($gateway['name'], $payment, "Chargeback recebido");
-            _seixastec_mp_add_invoice_note(
-                $invoiceId,
-                "⚠️ CHARGEBACK recebido no Mercado Pago. Payment ID: {$paymentId}. Verifique a fatura."
-            );
-            break;
-
-        case 'cancelled':
-            logTransaction($gateway['name'], $payment, "Pagamento cancelado");
-            break;
-
-        case 'rejected':
-            $detail = (string) ($payment['status_detail'] ?? 'sem detalhe');
-            logTransaction($gateway['name'], $payment, "Pagamento rejeitado: {$detail}");
-            break;
-
-        case 'pending':
-        case 'in_process':
-        case 'authorized':
-            logTransaction($gateway['name'], $payment, "Status: {$status}");
-            break;
-
-        default:
-            logTransaction($gateway['name'], $payment, "Status desconhecido: {$status}");
-            break;
+    // VULN-02 FIX: Valida valor do pagamento contra o total da fatura
+    $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+    if (!$invoice) {
+        $log('Webhook WARN', "Fatura {$invoiceId} não encontrada na base de dados.");
+        return;
     }
 
-    // Reembolso parcial (status continua approved, mas amount_refunded > 0)
-    if ($status === 'approved' && $amountRefunded > 0) {
+    $invoiceTotal = (float) $invoice->total;
+    $feePercent   = (float) ($gateway['feePercent'] ?? 0);
+    $expectedTotal = $feePercent > 0
+        ? round($invoiceTotal * (1 + $feePercent / 100), 2)
+        : $invoiceTotal;
+    $tolerance = 0.05; // R$0,05 para arredondamentos
+
+    if ($status === 'approved' && abs($amount - $expectedTotal) > $tolerance) {
+        $log('Webhook AMOUNT MISMATCH', [
+            'payment_id' => $paymentId,
+            'invoice_id' => $invoiceId,
+            'expected'   => $expectedTotal,
+            'received'   => $amount,
+        ]);
         _seixastec_mp_add_invoice_note(
             $invoiceId,
-            "Reembolso PARCIAL via Mercado Pago. Payment ID: {$paymentId}. "
-            . "Valor reembolsado: R$ " . number_format($amountRefunded, 2, ',', '.')
+            "⚠️ ALERTA: Pagamento {$paymentId} com valor R$ " . number_format($amount, 2, ',', '.')
+            . " divergente do esperado R$ " . number_format($expectedTotal, 2, ',', '.')
+            . ". Verificar manualmente."
         );
+        return; // NÃO registra automaticamente
+    }
+
+    // VULN-06 FIX: Lock atómico para evitar race condition (pagamento duplicado)
+    $lockFile   = sys_get_temp_dir() . '/mp_payment_' . md5($paymentId) . '.lock';
+    $lockHandle = fopen($lockFile, 'c');
+
+    if (!$lockHandle || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
+        $log('Webhook SKIP', "Pagamento {$paymentId} já em processamento (lock ativo).");
+        if ($lockHandle) {
+            fclose($lockHandle);
+        }
+        return;
+    }
+
+    try {
+        // Verifica duplicação (impede pagamento duplicado para o mesmo transid)
+        checkCbTransID($paymentId);
+
+        $fee = (float) ($payment['fee_details'][0]['amount'] ?? 0);
+
+        $log('Webhook PROCESS', [
+            'payment_id'         => $paymentId,
+            'status'             => $status,
+            'invoice_id'         => $invoiceId,
+            'amount'             => $amount,
+            'amount_refunded'    => $amountRefunded,
+            'payment_method'     => $paymentMethod,
+            'payment_type'       => $paymentType,
+            'fee'                => $fee,
+        ]);
+
+        switch ($status) {
+            case 'approved':
+                addInvoicePayment(
+                    $invoiceId,        // invoice id
+                    $paymentId,        // transaction id
+                    $amount,           // valor pago
+                    $fee,              // taxa do gateway
+                    $gateway['name']   // gateway module
+                );
+                logTransaction($gateway['name'], $payment, "Aprovado ({$paymentMethod})");
+                break;
+
+            case 'refunded':
+                logTransaction($gateway['name'], $payment, "Reembolso TOTAL processado ({$amount})");
+                _seixastec_mp_add_invoice_note(
+                    $invoiceId,
+                    "Reembolso TOTAL via Mercado Pago. Payment ID: {$paymentId}. Valor: R$ " . number_format($amount, 2, ',', '.')
+                );
+                break;
+
+            case 'charged_back':
+                logTransaction($gateway['name'], $payment, "Chargeback recebido");
+                _seixastec_mp_add_invoice_note(
+                    $invoiceId,
+                    "⚠️ CHARGEBACK recebido no Mercado Pago. Payment ID: {$paymentId}. Verifique a fatura."
+                );
+                break;
+
+            case 'cancelled':
+                logTransaction($gateway['name'], $payment, "Pagamento cancelado");
+                break;
+
+            case 'rejected':
+                $detail = (string) ($payment['status_detail'] ?? 'sem detalhe');
+                logTransaction($gateway['name'], $payment, "Pagamento rejeitado: {$detail}");
+                break;
+
+            case 'pending':
+            case 'in_process':
+            case 'authorized':
+                logTransaction($gateway['name'], $payment, "Status: {$status}");
+                break;
+
+            default:
+                logTransaction($gateway['name'], $payment, "Status desconhecido: {$status}");
+                break;
+        }
+
+        // Reembolso parcial (status continua approved, mas amount_refunded > 0)
+        if ($status === 'approved' && $amountRefunded > 0) {
+            _seixastec_mp_add_invoice_note(
+                $invoiceId,
+                "Reembolso PARCIAL via Mercado Pago. Payment ID: {$paymentId}. "
+                . "Valor reembolsado: R$ " . number_format($amountRefunded, 2, ',', '.')
+            );
+        }
+    } finally {
+        flock($lockHandle, LOCK_UN);
+        fclose($lockHandle);
+        @unlink($lockFile);
     }
 }
 

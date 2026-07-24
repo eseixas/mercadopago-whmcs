@@ -36,11 +36,7 @@
         "ext-curl": "*",
         "ext-openssl": "*",
         "ext-mbstring": "*",
-        "ext-pdo": "*",
-        "mercadopago/dx-php": "^3.9",
-        "guzzlehttp/guzzle": "^7.8",
-        "monolog/monolog": "^3.5",
-        "ramsey/uuid": "^4.7"
+        "ext-pdo": "*"
     },
     "require-dev": {
         "phpunit/phpunit": "^10.5",

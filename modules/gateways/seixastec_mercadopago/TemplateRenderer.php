@@ -99,7 +99,7 @@ class TemplateRenderer
         $smarty->caching       = false;
         $smarty->cache_lifetime = self::CACHE_LIFETIME;
         $smarty->error_reporting = E_ALL & ~E_NOTICE & ~E_DEPRECATED;
-        $smarty->escape_html   = false; // controle manual de escape nos templates
+        $smarty->escape_html   = true; // auto-escape global — usar {$var nofilter} para HTML intencional
 
         self::$smarty = $smarty;
         return $smarty;

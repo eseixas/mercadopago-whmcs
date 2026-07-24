@@ -16,7 +16,7 @@
 
     {if $qrCodeBase64}
     <div style="margin:20px 0;">
-        <img src="data:image/png;base64,{$qrCodeBase64}"
+        <img src="data:image/png;base64,{$qrCodeBase64|escape:'html'}"
              alt="QR Code Pix"
              style="max-width:280px; width:100%; height:auto;
                     border:1px solid #ddd; padding:10px; background:#fff;
@@ -26,7 +26,7 @@
 
     <div class="input-group" style="max-width:520px; margin:0 auto;">
         <input type="text"
-               id="seixastec-pix-code-{$invoiceId|default:'main'}"
+               id="seixastec-pix-code-{$invoiceId|default:'main'|escape:'html'}"
                class="form-control"
                value="{$qrCode|escape:'html'}"
                readonly
@@ -35,7 +35,7 @@
         <span class="input-group-btn">
             <button type="button"
                     class="btn btn-success"
-                    onclick="seixastecCopyPix('seixastec-pix-code-{$invoiceId|default:'main'}', this);">
+                    onclick="seixastecCopyPix('seixastec-pix-code-{$invoiceId|default:'main'|escape:'html'}', this);">
                 <i class="fa fa-copy"></i> Copiar
             </button>
         </span>

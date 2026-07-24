@@ -242,26 +242,58 @@ add_hook('AdminInvoicesControlsOutput', SEIXASTEC_MP_HOOK_PRIORITY, function (ar
         return '';
     }
 
-    // Processa clique no botão
-    if (($_GET['mp_sync'] ?? '') === '1' && (int) ($_GET['id'] ?? 0) === $invoiceId) {
+    // VULN-04 FIX: Processa apenas via POST com token CSRF válido
+    if (
+        $_SERVER['REQUEST_METHOD'] === 'POST'
+        && ($_POST['mp_sync'] ?? '') === '1'
+        && (int) ($_POST['id'] ?? 0) === $invoiceId
+    ) {
+        // Valida token CSRF do WHMCS (compatível com 8.x/9.x)
+        $tokenValid = false;
+        if (function_exists('check_token')) {
+            $tokenValid = check_token();
+        } elseif (isset($_POST['token'], $_SESSION['token'])) {
+            $tokenValid = hash_equals((string) $_SESSION['token'], (string) $_POST['token']);
+        }
+
+        if (!$tokenValid) {
+            return <<<HTML
+<div style="margin:10px 0; padding:10px; background:#d9534f; color:#fff; border-radius:4px;">
+    <strong>✗ Sincronização MP:</strong> Token CSRF inválido. Recarregue a página e tente novamente.
+</div>
+HTML;
+        }
+
         $result = _seixastec_mp_sync_invoice($invoiceId);
         $color  = $result['success'] ? '#5cb85c' : '#d9534f';
         $icon   = $result['success'] ? '✓' : '✗';
+        $msg    = htmlspecialchars($result['message'], ENT_QUOTES, 'UTF-8');
 
         return <<<HTML
 <div style="margin:10px 0; padding:10px; background:{$color}; color:#fff; border-radius:4px;">
-    <strong>{$icon} Sincronização MP:</strong> {$result['message']}
+    <strong>{$icon} Sincronização MP:</strong> {$msg}
 </div>
-<a href="invoices.php?action=edit&id={$invoiceId}" class="btn btn-default btn-sm">
-    <i class="fa fa-refresh"></i> Sincronizar com Mercado Pago
-</a>
 HTML;
     }
 
+    // Gera token CSRF para o formulário
+    $csrfToken = '';
+    if (function_exists('generate_token')) {
+        $csrfToken = generate_token();
+    } elseif (isset($_SESSION['token'])) {
+        $csrfToken = (string) $_SESSION['token'];
+    }
+    $csrfToken = htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8');
+
     return <<<HTML
-<a href="invoices.php?action=edit&id={$invoiceId}&mp_sync=1" class="btn btn-info btn-sm" style="margin:5px 0;">
-    <i class="fa fa-refresh"></i> Sincronizar com Mercado Pago
-</a>
+<form method="post" action="invoices.php?action=edit&id={$invoiceId}" style="display:inline-block; margin:5px 0;">
+    <input type="hidden" name="token" value="{$csrfToken}">
+    <input type="hidden" name="mp_sync" value="1">
+    <input type="hidden" name="id" value="{$invoiceId}">
+    <button type="submit" class="btn btn-info btn-sm">
+        <i class="fa fa-refresh"></i> Sincronizar com Mercado Pago
+    </button>
+</form>
 HTML;
 });
 

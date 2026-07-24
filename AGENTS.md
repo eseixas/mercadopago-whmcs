@@ -60,3 +60,11 @@ CI (GitHub Actions): lint → phpstan → test matrix (PHP 8.2/8.3/8.4 × prefer
 - Config fields consolidated in v2.2.0+: use **`accessToken`** and **`publicKey`** (no `accessTokenProd`/`accessTokenSandbox` split).
 - `.env` is gitignored — contains FTP credentials for deploy script. `_mp_diag.php` is gitignored (diagnostic tool). Never commit these.
 - Deploy via `deploy_ftp.ps1` which uses WSL+lftp, not a native PowerShell FTP client. Reads `FTP_HOST/USER/PASS/REMOTE_BASE` from `.env`.
+
+## Opencode Agents
+
+Automation agents defined in `.opencode/agent/` for the OpenCode ecosystem:
+
+- **Full Deployer** ([deployer.md](file:///.opencode/agent/deployer.md)) — Orchestrates the full pipeline: commits to GitHub first, then deploys to the server.
+- **Git Publisher** ([git-publisher.md](file:///.opencode/agent/git-publisher.md)) — Specialized in publishing changes to GitHub using Semantic Commits and safe push practices.
+- **Server Deployer** ([server-deployer.md](file:///.opencode/agent/server-deployer.md)) — Handles secure file uploads/deployment to the production server.

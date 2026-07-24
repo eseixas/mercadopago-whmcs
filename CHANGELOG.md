@@ -6,6 +6,45 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.
 
 ---
 
+## [2.4.0] — 2026-07-24
+
+### 🔒 Segurança
+
+Correções resultantes de auditoria de segurança completa (19 vulnerabilidades identificadas e corrigidas):
+
+**Críticas:**
+- **VULN-01:** Webhook agora **recusa requisições** quando `webhookSecret` não está configurado (HTTP 503). Anteriormente processava sem validação HMAC.
+- **VULN-02:** Callback agora **valida o valor do pagamento** contra o total da fatura (com tolerância de R$0,05). Pagamentos com valor divergente são registados como nota para verificação manual, não aplicados automaticamente.
+
+**Altas:**
+- **VULN-03:** `alert.tpl` — `{$message}` e `{$icon}` agora escapados com `|escape:'html'`.
+- **VULN-04:** Botão "Sincronizar com MP" no admin convertido de link GET para **formulário POST com token CSRF**.
+- **VULN-05:** `payment_method_id` no fluxo de boleto agora validado contra **whitelist** (`bolbradesco`, `pec`).
+- **VULN-06:** Processamento de pagamentos no callback protegido por **lock file atómico** (`flock`) — elimina race condition de pagamento duplicado.
+
+**Médias:**
+- **VULN-07:** `pix.tpl` — `{$qrCodeBase64}` e `{$invoiceId}` escapados com `|escape:'html'`.
+- **VULN-08:** CDNs Bootstrap e Font Awesome agora carregados com **Subresource Integrity (SRI)**.
+- **VULN-10:** Logs de debug do webhook **não expõem mais** headers sensíveis (`authorization`, `cookie`, `x-signature`).
+- **VULN-11:** *(mitigado por VULN-04 + headers de segurança)*.
+- **VULN-13:** Smarty `escape_html` alterado para `true` (auto-escape global).
+
+**Baixas:**
+- **VULN-14:** Chave de idempotência usa `hash('sha256', ...)` em vez de `md5()`.
+- **VULN-15:** Logs de exceção em `process.php` não incluem mais stack trace completo.
+- **VULN-16:** `pay.php` envia headers `Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`.
+- **VULN-17:** Interpolação SQL em `seixastec_mp_install.php` substituída por concatenação de constante.
+
+**Informativas:**
+- **INFO-01:** Removidas dependências não utilizadas do `composer.json` (`mercadopago/dx-php`, `guzzlehttp/guzzle`, `monolog/monolog`, `ramsey/uuid`).
+- **INFO-02:** Header `Authorization` na `Api.php` corrigido para formato `Bearer <token>`.
+
+### ⚠️ Breaking Change
+
+- O campo **`webhookSecret`** passa a ser **obrigatório** para o funcionamento do webhook. Instale o secret no painel do Mercado Pago (Your Integrations → Webhooks) e configure-o no gateway WHMCS antes de atualizar.
+
+---
+
 ## [2.3.0] — 2026-05-12
 
 ### ✨ Adicionado
