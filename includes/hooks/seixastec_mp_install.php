@@ -77,20 +77,18 @@ add_hook('AdminAreaPage', 1, function (array $vars): void {
     $checked = true;
 
     try {
-        $lastCheck = (int) (Capsule::table('tblconfiguration')
-            ->where('setting', SEIXASTEC_MP_LASTCHECK_KEY)
-            ->value('value') ?: 0);
-
-        // Verifica no máximo 1x por dia
-        if ((time() - $lastCheck) < 86400) {
-            return;
-        }
-
         if (seixastec_mp_needsMigration()) {
             seixastec_mp_runMigrations(false);
         }
 
-        // Registra timestamp da verificação
+        $lastCheck = (int) (Capsule::table('tblconfiguration')
+            ->where('setting', SEIXASTEC_MP_LASTCHECK_KEY)
+            ->value('value') ?: 0);
+
+        if ((time() - $lastCheck) < 86400) {
+            return;
+        }
+
         Capsule::table('tblconfiguration')->updateOrInsert(
             ['setting' => SEIXASTEC_MP_LASTCHECK_KEY],
             ['value' => (string) time()]
