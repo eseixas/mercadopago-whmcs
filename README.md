@@ -8,9 +8,9 @@ Aceite pagamentos via **Pix**, **Cartão de Crédito**, **Boleto** e **Saldo Mer
 
 [![CI](https://github.com/eseixas/mercadopago-whmcs/actions/workflows/ci.yml/badge.svg)](https://github.com/eseixas/mercadopago-whmcs/actions/workflows/ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/eseixas/mercadopago-whmcs?include_prereleases&sort=semver)](https://github.com/eseixas/mercadopago-whmcs/releases)
-[![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-8892BF.svg)](https://www.php.net/)
-[![WHMCS](https://img.shields.io/badge/WHMCS-%3E%3D8.6-2563EB.svg)](https://www.whmcs.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PHP Version](https://img.shields.io/badge/php-%3E%3D8.2-8892BF.svg)](https://www.php.net/)
+[![WHMCS](https://img.shields.io/badge/WHMCS-%3E%3D8.10-2563EB.svg)](https://www.whmcs.com/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/eseixas/mercadopago-whmcs?style=social)](https://github.com/eseixas/mercadopago-whmcs/stargazers)
 
 [**📦 Instalação**](#-instalação) •

@@ -17,7 +17,7 @@
  *
  * @package   SeixasTec\MercadoPago
  * @author    Eduardo Seixas <https://github.com/eseixas>
- * @version   2.4.0
+ * @version   2.4.1
  * @license   GPL-3.0
  * @link      https://github.com/eseixas/mercadopago-whmcs
  */
@@ -26,16 +26,23 @@ declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\InvoiceAmount;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\TemplateRenderer;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\TransactionStore;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\BrazilAddress;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\Validator;
 
 if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
+require_once __DIR__ . '/seixastec_mercadopago/constants.php';
 require_once __DIR__ . '/seixastec_mercadopago/Api.php';
-
-use WHMCS\Module\Gateway\SeixastecMercadoPago\TemplateRenderer;
-
+require_once __DIR__ . '/seixastec_mercadopago/InvoiceAmount.php';
 require_once __DIR__ . '/seixastec_mercadopago/TemplateRenderer.php';
+require_once __DIR__ . '/seixastec_mercadopago/TransactionStore.php';
+require_once __DIR__ . '/seixastec_mercadopago/Validator.php';
+require_once __DIR__ . '/seixastec_mercadopago/BrazilAddress.php';
 
 // =============================================================================
 // METADATA
@@ -68,7 +75,7 @@ function seixastec_mercadopago_config(): array
         // ----- Cabeçalho -----
         'FriendlyName' => [
             'Type'  => 'System',
-            'Value' => 'Mercado Pago (SeixasTec) v2.4.0',
+            'Value' => 'Mercado Pago (SeixasTec) v2.4.1',
         ],
 
         // ----- Identificação no checkout do cliente -----
@@ -124,6 +131,13 @@ function seixastec_mercadopago_config(): array
             ],
             'Default'      => 'checkout_pro',
             'Description'  => 'Forma de apresentação do pagamento ao cliente.',
+        ],
+        'feePercent' => [
+            'FriendlyName' => 'Taxa adicional (%)',
+            'Type'         => 'text',
+            'Size'         => '10',
+            'Default'      => '0',
+            'Description'  => 'Percentual somado ao total da fatura no checkout (0 = desligado). O webhook e o cron usam o mesmo cálculo.',
         ],
 
         // ----- Configurações de Pix -----
@@ -221,6 +235,8 @@ function seixastec_mercadopago_link(array $params): string
         }
         $amount = _seixastec_mp_convert_to_brl($amount, $currency);
     }
+
+    $amount = InvoiceAmount::expected($amount, (float) ($params['feePercent'] ?? 0));
 
     if ($amount <= 0) {
         return _seixastec_mp_alert('danger', 'Valor da fatura inválido.');
@@ -479,6 +495,12 @@ function _seixastec_mp_render_pix(Api $api, array $params, float $amount): strin
         );
     }
 
+    try {
+        TransactionStore::save((int) $params['invoiceid'], $payment, 'pix', $amount);
+    } catch (\Throwable $e) {
+        // auditoria local não bloqueia o QR
+    }
+
     return _seixastec_mp_pix_html($payment, $params);
 }
 
@@ -551,6 +573,12 @@ function _seixastec_mp_render_boleto(Api $api, array $params, float $amount): st
         );
     }
 
+    try {
+        TransactionStore::save((int) $params['invoiceid'], $payment, 'bolbradesco', $amount);
+    } catch (\Throwable $e) {
+        // auditoria local não bloqueia o boleto
+    }
+
     return _seixastec_mp_boleto_html($payment);
 }
 
@@ -558,14 +586,14 @@ function _seixastec_mp_validate_boleto_data(array $params): ?string
 {
     $client = $params['clientdetails'] ?? [];
 
-    if (empty($client['tax_id']) && empty($client['cpf']) && empty($client['customfields'])) {
-        return 'Boleto requer CPF cadastrado. Atualize seus dados antes de prosseguir.';
+    if (_seixastec_mp_client_document($params) === '') {
+        return 'Boleto requer CPF ou CNPJ cadastrado. Atualize seus dados antes de prosseguir.';
     }
 
     $required = ['firstname', 'lastname', 'address1', 'city', 'state', 'postcode'];
     foreach ($required as $field) {
         if (empty($client[$field])) {
-            return "Boleto requer endereço completo. Campo faltante: <strong>{$field}</strong>.";
+            return 'Boleto requer endereço completo. Campo faltante: ' . $field . '.';
         }
     }
 
@@ -582,7 +610,7 @@ function _seixastec_mp_build_boleto(array $params, float $amount): array
     $expires = (new \DateTimeImmutable('+' . $days . ' days'))->format('Y-m-d\TH:i:s.000P');
 
     $client = $params['clientdetails'];
-    $cpf    = preg_replace('/\D/', '', (string) ($client['tax_id'] ?? $client['cpf'] ?? ''));
+    $doc    = _seixastec_mp_client_document($params);
 
     return [
         'transaction_amount' => round($amount, 2),
@@ -596,16 +624,16 @@ function _seixastec_mp_build_boleto(array $params, float $amount): array
             'first_name' => (string) $client['firstname'],
             'last_name'  => (string) $client['lastname'],
             'identification' => [
-                'type'   => strlen($cpf) === 14 ? 'CNPJ' : 'CPF',
-                'number' => $cpf,
+                'type'   => strlen($doc) === 14 ? 'CNPJ' : 'CPF',
+                'number' => $doc,
             ],
             'address' => [
                 'zip_code'      => preg_replace('/\D/', '', (string) $client['postcode']),
                 'street_name'   => (string) $client['address1'],
-                'street_number' => 'S/N',
-                'neighborhood'  => (string) ($client['address2'] ?? 'Centro'),
+                'street_number' => BrazilAddress::streetNumber((string) ($client['address1'] ?? '')),
+                'neighborhood'  => (string) ($client['address2'] ?: 'Centro'),
                 'city'          => (string) $client['city'],
-                'federal_unit'  => (string) $client['state'],
+                'federal_unit'  => BrazilAddress::federalUnit((string) $client['state']),
             ],
         ],
     ];
@@ -670,3 +698,58 @@ function _seixastec_mp_alert(string $type, string $message, string $icon = ''): 
         'icon'    => $icon,
     ]);
 }
+
+/**
+ * CPF/CNPJ do cliente: tax_id, cpf, custom fields WHMCS ou tabela tblcustomfieldsvalues.
+ */
+function _seixastec_mp_client_document(array $params): string
+{
+    $client = $params['clientdetails'] ?? [];
+    $candidates = [
+        (string) ($client['tax_id'] ?? ''),
+        (string) ($client['cpf'] ?? ''),
+    ];
+
+    if (!empty($client['customfields']) && is_array($client['customfields'])) {
+        foreach ($client['customfields'] as $field) {
+            if (!is_array($field)) {
+                continue;
+            }
+            $name = mb_strtolower((string) ($field['name'] ?? $field['fieldname'] ?? ''));
+            if (str_contains($name, 'cpf') || str_contains($name, 'cnpj') || str_contains($name, 'documento')) {
+                $candidates[] = (string) ($field['value'] ?? $field['rawvalue'] ?? '');
+            }
+        }
+    }
+
+    foreach ($candidates as $raw) {
+        $clean = Validator::sanitize($raw);
+        if (Validator::validate($clean)) {
+            return $clean;
+        }
+    }
+
+    $clientId = (int) ($client['id'] ?? $client['userid'] ?? $params['clientdetails']['userid'] ?? 0);
+    if ($clientId <= 0) {
+        return '';
+    }
+
+    try {
+        $fromCf = Capsule::table('tblcustomfieldsvalues as v')
+            ->join('tblcustomfields as f', 'f.id', '=', 'v.fieldid')
+            ->where('v.relid', $clientId)
+            ->where('f.type', 'client')
+            ->whereIn('f.fieldname', ['CPF', 'CNPJ', 'CPF/CNPJ', 'Documento'])
+            ->value('v.value');
+        $clean = Validator::sanitize((string) $fromCf);
+        if (Validator::validate($clean)) {
+            return $clean;
+        }
+    } catch (\Throwable $e) {
+        // campo opcional
+    }
+
+    return '';
+}
+
+

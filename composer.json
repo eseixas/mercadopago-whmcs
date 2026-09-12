@@ -73,8 +73,8 @@
         "psalm": "psalm --show-info=true",
         "cs:check": "php-cs-fixer fix --dry-run --diff --verbose",
         "cs:fix": "php-cs-fixer fix --verbose",
-        "phpcs": "phpcs --standard=PSR12 src/ tests/",
-        "phpcbf": "phpcbf --standard=PSR12 src/ tests/",
+        "phpcs": "phpcs --standard=PSR12 modules/ includes/ tests/",
+        "phpcbf": "phpcbf --standard=PSR12 modules/ includes/ tests/",
         "rector": "rector process --dry-run",
         "rector:fix": "rector process",
         "qa": [
@@ -123,7 +123,7 @@
         "whmcs": {
             "min-version": "8.10",
             "module-type": "gateway",
-            "module-name": "mercadopago",
+            "module-name": "seixastec_mercadopago",
             "vendor-name": "seixastec"
         }
     },

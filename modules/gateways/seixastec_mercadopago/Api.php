@@ -184,9 +184,14 @@ class Api
     /**
      * Cria pagamento direto (PIX, Boleto, Cartão tokenizado).
      */
-    public function createPayment(array $payment): ?array
+    public function createPayment(array $payment, ?string $idempotencyKey = null): ?array
     {
-        return $this->request('POST', '/v1/payments', $payment, true);
+        if (isset($payment['__idempotency_key'])) {
+            $idempotencyKey = $idempotencyKey ?? (string) $payment['__idempotency_key'];
+            unset($payment['__idempotency_key']);
+        }
+
+        return $this->request('POST', '/v1/payments', $payment, true, $idempotencyKey);
     }
 
     /**
@@ -350,13 +355,15 @@ class Api
      * @param string     $method     POST, GET, PUT, DELETE
      * @param string     $path       Caminho relativo (começa com `/`)
      * @param array|null $body       Corpo da requisição (apenas POST/PUT/PATCH)
-     * @param bool       $idempotent Adiciona X-Idempotency-Key
+     * @param bool        $idempotent      Adiciona X-Idempotency-Key
+     * @param string|null $idempotencyKey  Chave estável; se vazia, deriva de método+path+body
      */
     private function request(
         string $method,
         string $path,
         ?array $body = null,
-        bool $idempotent = false
+        bool $idempotent = false,
+        ?string $idempotencyKey = null
     ): ?array {
         $this->lastError     = null;
         $this->lastHttpCode  = null;
@@ -380,7 +387,10 @@ class Api
         // Idempotency-Key gerada UMA VEZ (fora do loop de retry) para garantir
         // que o MP reconheça retries automáticos como a mesma operação lógica.
         if ($idempotent) {
-            $headers[] = 'X-Idempotency-Key: ' . $this->generateIdempotencyKey($method, $path, $jsonBody);
+            $key = ($idempotencyKey !== null && $idempotencyKey !== '')
+                ? $idempotencyKey
+                : $this->generateIdempotencyKey($method, $path, $jsonBody);
+            $headers[] = 'X-Idempotency-Key: ' . $key;
         }
 
         $attempt         = 0;
@@ -537,8 +547,7 @@ class Api
      */
     private function generateIdempotencyKey(string $method, string $path, ?string $body): string
     {
-        $seed = $method . '|' . $path . '|' . ($body ?? '') . '|' . bin2hex(random_bytes(8));
-        return hash('sha256', $seed);
+        return hash('sha256', $method . '|' . $path . '|' . ($body ?? ''));
     }
 
     /**

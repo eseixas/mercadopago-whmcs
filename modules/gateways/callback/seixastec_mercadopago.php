@@ -35,6 +35,8 @@ declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\InvoiceAmount;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\WebhookSignature;
 
 // =============================================================================
 // BOOTSTRAP WHMCS
@@ -43,7 +45,11 @@ use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
 require_once __DIR__ . '/../../../init.php';
 require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
+require_once __DIR__ . '/../seixastec_mercadopago/constants.php';
 require_once __DIR__ . '/../seixastec_mercadopago/Api.php';
+require_once __DIR__ . '/../seixastec_mercadopago/InvoiceAmount.php';
+require_once __DIR__ . '/../seixastec_mercadopago/WebhookSignature.php';
+require_once __DIR__ . '/../seixastec_mercadopago/TransactionStore.php';
 
 // =============================================================================
 // CARREGA CONFIGURAÇÃO DO GATEWAY
@@ -128,7 +134,7 @@ $signatureHeader = $headers['x-signature']  ?? '';
 $requestIdHeader = $headers['x-request-id'] ?? '';
 $dataId          = $_GET['data.id'] ?? $_GET['id'] ?? ($payload['data']['id'] ?? '');
 
-if (!_seixastec_mp_validate_signature($signatureHeader, $requestIdHeader, (string) $dataId, $webhookSecret)) {
+if (!WebhookSignature::isValid($signatureHeader, $requestIdHeader, (string) $dataId, $webhookSecret)) {
     $log('Webhook SIGNATURE INVALID', [
         'x-signature'  => $signatureHeader,
         'x-request-id' => $requestIdHeader,
@@ -191,18 +197,23 @@ if (empty($paymentIds)) {
     exit('OK - no payments');
 }
 
-// Processa cada pagamento
+$hadRetryableFailure = false;
+
 foreach (array_unique($paymentIds) as $paymentId) {
     try {
         _seixastec_mp_process_payment($api, $paymentId, $gateway, $log);
     } catch (\Throwable $e) {
+        $hadRetryableFailure = true;
         $log('Webhook EXCEPTION', [
             'payment_id' => $paymentId,
             'error'      => $e->getMessage(),
-            'trace'      => $e->getTraceAsString(),
         ]);
-        // Continua processando os outros payments
     }
+}
+
+if ($hadRetryableFailure) {
+    http_response_code(503);
+    exit('Temporary failure');
 }
 
 http_response_code(200);
@@ -220,10 +231,15 @@ function _seixastec_mp_process_payment(Api $api, string $paymentId, array $gatew
     $payment = $api->getPayment($paymentId);
 
     if ($payment === null) {
+        $httpCode = $api->getLastHttpCode() ?? 0;
         $log('Webhook ERROR', [
             'payment_id' => $paymentId,
             'error'      => $api->getLastError(),
+            'http_code'  => $httpCode,
         ]);
+        if ($httpCode === 0 || $httpCode >= 500 || $httpCode === 429) {
+            throw new \RuntimeException('Falha temporária ao consultar pagamento ' . $paymentId);
+        }
         return;
     }
 
@@ -253,14 +269,12 @@ function _seixastec_mp_process_payment(Api $api, string $paymentId, array $gatew
         return;
     }
 
-    $invoiceTotal = (float) $invoice->total;
-    $feePercent   = (float) ($gateway['feePercent'] ?? 0);
-    $expectedTotal = $feePercent > 0
-        ? round($invoiceTotal * (1 + $feePercent / 100), 2)
-        : $invoiceTotal;
-    $tolerance = 0.05; // R$0,05 para arredondamentos
+    $expectedTotal = InvoiceAmount::expected(
+        (float) $invoice->total,
+        (float) ($gateway['feePercent'] ?? 0)
+    );
 
-    if ($status === 'approved' && abs($amount - $expectedTotal) > $tolerance) {
+    if ($status === 'approved' && !InvoiceAmount::matches($amount, $expectedTotal)) {
         $log('Webhook AMOUNT MISMATCH', [
             'payment_id' => $paymentId,
             'invoice_id' => $invoiceId,
@@ -280,12 +294,12 @@ function _seixastec_mp_process_payment(Api $api, string $paymentId, array $gatew
     $lockFile   = sys_get_temp_dir() . '/mp_payment_' . md5($paymentId) . '.lock';
     $lockHandle = fopen($lockFile, 'c');
 
-    if (!$lockHandle || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
-        $log('Webhook SKIP', "Pagamento {$paymentId} já em processamento (lock ativo).");
+    if (!$lockHandle || !flock($lockHandle, LOCK_EX)) {
+        $log('Webhook SKIP', "Não foi possível obter lock para {$paymentId}.");
         if ($lockHandle) {
             fclose($lockHandle);
         }
-        return;
+        throw new \RuntimeException('Lock indisponível para pagamento ' . $paymentId);
     }
 
     try {
@@ -315,6 +329,12 @@ function _seixastec_mp_process_payment(Api $api, string $paymentId, array $gatew
                     $gateway['name']   // gateway module
                 );
                 logTransaction($gateway['name'], $payment, "Aprovado ({$paymentMethod})");
+                \WHMCS\Module\Gateway\SeixastecMercadoPago\TransactionStore::save(
+                    (int) $invoiceId,
+                    $payment,
+                    $paymentMethod,
+                    $amount
+                );
                 break;
 
             case 'refunded':
@@ -415,61 +435,4 @@ function _seixastec_mp_get_headers(): array
     }
 
     return $headers;
-}
-
-/**
- * Valida assinatura HMAC do webhook do Mercado Pago.
- *
- * Formato do header x-signature:
- *   ts=1234567890,v1=hex_hmac_sha256
- *
- * Template assinado:
- *   id:<data.id>;request-id:<x-request-id>;ts:<ts>;
- *
- * @see https://www.mercadopago.com.br/developers/pt/docs/your-integrations/notifications/webhooks
- */
-function _seixastec_mp_validate_signature(
-    string $signatureHeader,
-    string $requestId,
-    string $dataId,
-    string $secret
-): bool {
-    if ($signatureHeader === '' || $dataId === '') {
-        return false;
-    }
-
-    // Parse "ts=...,v1=..."
-    $parts = [];
-    foreach (explode(',', $signatureHeader) as $segment) {
-        $kv = explode('=', trim($segment), 2);
-        if (count($kv) === 2) {
-            $parts[trim($kv[0])] = trim($kv[1]);
-        }
-    }
-
-    $ts = $parts['ts'] ?? '';
-    $v1 = $parts['v1'] ?? '';
-
-    if ($ts === '' || $v1 === '') {
-        return false;
-    }
-
-    // Proteção anti-replay: timestamp não pode ser muito antigo (>5min) nem do futuro (>1min)
-    $now    = time();
-    $tsInt  = (int) $ts;
-    if ($tsInt > 0 && ($now - $tsInt > 300 || $tsInt - $now > 60)) {
-        return false;
-    }
-
-    // Template oficial do MP (data.id em lowercase)
-    $template = sprintf(
-        'id:%s;request-id:%s;ts:%s;',
-        strtolower($dataId),
-        $requestId,
-        $ts
-    );
-
-    $expected = hash_hmac('sha256', $template, $secret);
-
-    return hash_equals($expected, $v1);
 }

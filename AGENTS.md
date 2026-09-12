@@ -9,6 +9,11 @@ modules/gateways/seixastec_mercadopago.php  — WHMCS gateway entrypoint (config
 modules/gateways/seixastec_mercadopago/
   Api.php               — HTTP client for MP API v1, retry 3x exp backoff, idempotency keys
   Validator.php          — final class, static CPF/CNPJ math validation
+  InvoiceAmount.php      — total esperado da fatura + tolerância
+  WebhookSignature.php   — HMAC x-signature + janela anti-replay
+  TransactionStore.php   — persiste PIX/boleto em mod_seixastec_mp_transactions
+  BrazilAddress.php      — UF e número do logradouro
+  constants.php         — define() compartilhado (evita const duplicado nos hooks)
   TemplateRenderer.php   — Smarty renderer with theme-override support
   pay.php               — Custom checkout page (Payment Brick JS SDK v2)
   process.php           — AJAX endpoint for Brick submissions, server-side amount recalculation
@@ -16,7 +21,7 @@ modules/gateways/seixastec_mercadopago/
   logo.png, whmcs.json
 modules/gateways/callback/seixastec_mercadopago.php  — Webhook/IPN handler, HMAC-SHA256
 includes/hooks/
-  seixastec_mp_install.php        — Auto-install + schema migration (current: v2)
+  seixastec_mp_install.php        — Auto-install + schema migration (current: v3)
   seixastec_mp_cleanup.php        — Daily cron: stale lock file removal
   seixastec_mercadopago.php       — 8-hook system (DailyCronJob, InvoicePaid/Cancelled/Creation, admin UI, client sidebar)
   seixastec_mercadopago_pdf.php   — PIX QR + Boleto injection in TCPDF PDF, emails (merge_fields), client area
@@ -31,7 +36,7 @@ composer test            # phpunit all
 composer test:unit       # Unit suite only
 composer test:integration # Integration suite only
 composer cs:fix          # auto-format PHP-CS-Fixer
-composer phpstan         # static analysis (256M memory)
+composer phpstan         # static analysis (512M memory)
 composer build           # production build: composer install --no-dev + scripts/build-release.php
 ```
 

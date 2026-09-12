@@ -6,6 +6,32 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.
 
 ---
 
+## [2.4.1] — 2026-09-11
+
+### 🔒 Segurança
+
+- Cron diário e botão **Sincronizar com Mercado Pago** passam a recusar pagamento com valor divergente da fatura (mesma regra do webhook, tolerância R$ 0,05).
+- Webhook devolve HTTP 503 em falha temporária da API do MP (em vez de 200), para o Mercado Pago retentar.
+- Idempotency-Key estável (sem bytes aleatórios); `process.php` envia a chave no header.
+
+### 🐛 Corrigido
+
+- Constantes globais duplicadas nos hooks (`SEIXASTEC_MP_MODULE`, `SEIXASTEC_MP_TABLE`) — fatal no boot do WHMCS.
+- CSRF do botão admin: `generate_token('plain')` em vez do HTML do token.
+- PIX/boleto gravados em `mod_seixastec_mp_transactions` (QR, copia-e-cola, URL, linha) para PDF, e-mail e área do cliente.
+- Schema v3: várias transações por fatura (`invoice_id` deixa de ser UNIQUE).
+- Brick (`pay.php`): CSP permitia o SDK mas bloqueava o script inline; `paymentMode` e `pixExpirationMinutes` passam a ser lidos.
+- Boleto: UF brasileira e bairro; CPF/CNPJ via custom fields + `Validator`.
+- Testes alinhados à API real (`Validator`, `InvoiceAmount`, `WebhookSignature`); PHPUnit aponta para `tests/Unit`; PHPStan e CS-Fixer deixam de referenciar `src/`.
+- `deploy_ftp.ps1` usa o diretório do repositório (não mais `/c/Temp/...`).
+
+### ✨ Adicionado
+
+- Campo de configuração **Taxa adicional (%)** (`feePercent`).
+- Classes `InvoiceAmount`, `WebhookSignature`, `TransactionStore`, `BrazilAddress`.
+
+---
+
 ## [2.4.0] — 2026-07-24
 
 ### 🔒 Segurança

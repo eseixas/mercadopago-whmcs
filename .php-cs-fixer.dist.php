@@ -12,11 +12,11 @@ declare(strict_types=1);
  */
 
 $finder = PhpCsFixer\Finder::create()
-    ->in([
-        __DIR__ . '/src',
-        __DIR__ . '/tests',
+    ->in(array_values(array_filter([
         __DIR__ . '/modules',
-    ])
+        __DIR__ . '/includes',
+        __DIR__ . '/tests',
+    ], 'is_dir')))
     ->name('*.php')
     ->notName('*.blade.php')
     ->exclude([

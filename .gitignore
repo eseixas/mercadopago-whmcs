@@ -12,6 +12,7 @@ desktop.ini
 # Composer
 vendor/
 composer.lock
+composer.phar
 
 # Logs
 *.log
@@ -29,3 +30,11 @@ _mp_diag.php
 # Agent / Tooling
 .agents/
 skills-lock.json
+
+# Build / QA caches
+build/
+.phpstan.cache/
+.phpunit.cache/
+.php-cs-fixer.cache
+.deploy.lftp
+php-dev.ini

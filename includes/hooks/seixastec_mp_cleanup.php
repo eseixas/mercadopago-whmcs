@@ -3,6 +3,8 @@
  * Daily cleanup of stale lock files from the Mercado Pago webhook handler.
  */
 
+declare(strict_types=1);
+
 if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }

@@ -25,24 +25,25 @@ declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\InvoiceAmount;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\TransactionStore;
 
 if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
-// Garante o autoload manual da Api (alguns ambientes WHMCS não fazem PSR-4)
-$_apiPath = __DIR__ . '/../../modules/gateways/seixastec_mercadopago/Api.php';
-if (file_exists($_apiPath) && !class_exists(Api::class, false)) {
-    require_once $_apiPath;
+$_mpDir = dirname(__DIR__, 2) . '/modules/gateways/seixastec_mercadopago';
+require_once $_mpDir . '/constants.php';
+if (!class_exists(Api::class, false)) {
+    require_once $_mpDir . '/Api.php';
 }
-unset($_apiPath);
-
-// =============================================================================
-// CONSTANTES INTERNAS
-// =============================================================================
-
-const SEIXASTEC_MP_MODULE = 'seixastec_mercadopago';
-const SEIXASTEC_MP_HOOK_PRIORITY = 50;
+if (!class_exists(InvoiceAmount::class, false)) {
+    require_once $_mpDir . '/InvoiceAmount.php';
+}
+if (!class_exists(TransactionStore::class, false)) {
+    require_once $_mpDir . '/TransactionStore.php';
+}
+unset($_mpDir);
 
 // =============================================================================
 // HOOK 1: DailyCronJob
@@ -88,19 +89,8 @@ add_hook('DailyCronJob', SEIXASTEC_MP_HOOK_PRIORITY, function () {
                 continue;
             }
 
-            // Pagamento aprovado detectado - aplica
             if ($status === 'approved') {
-                $exists = Capsule::table('tblaccounts')
-                    ->where('invoiceid', $invoice->id)
-                    ->where('transid', $paymentId)
-                    ->exists();
-
-                if (!$exists) {
-                    $amount = (float) ($payment['transaction_amount'] ?? $invoice->total);
-                    $fee    = (float) ($payment['fee_details'][0]['amount'] ?? 0);
-
-                    addInvoicePayment($invoice->id, $paymentId, $amount, $fee, SEIXASTEC_MP_MODULE);
-                    logTransaction(SEIXASTEC_MP_MODULE, $payment, 'Sincronizado via DailyCron');
+                if (_seixastec_mp_apply_approved_payment((int) $invoice->id, $payment, $gateway, 'DailyCron')) {
                     $stats['updated']++;
                 }
                 break;
@@ -279,7 +269,7 @@ HTML;
     // Gera token CSRF para o formulário
     $csrfToken = '';
     if (function_exists('generate_token')) {
-        $csrfToken = generate_token();
+        $csrfToken = (string) generate_token('plain');
     } elseif (isset($_SESSION['token'])) {
         $csrfToken = (string) $_SESSION['token'];
     }
@@ -317,7 +307,7 @@ add_hook('AdminAreaHeadOutput', SEIXASTEC_MP_HOOK_PRIORITY, function (array $var
     $warnings = [];
 
     if (empty($gateway['webhookSecret'])) {
-        $warnings[] = '⚠️ <strong>Webhook Secret</strong> não configurado. A validação HMAC está desabilitada (inseguro em produção).';
+        $warnings[] = '⚠️ <strong>Webhook Secret</strong> não configurado. O webhook recusa todas as notificações (HTTP 503) até o secret ser definido.';
     }
 
     $token = (string) ($gateway['accessToken'] ?? '');
@@ -499,26 +489,7 @@ function _seixastec_mp_sync_invoice(int $invoiceId): array
 
     $applied = 0;
     foreach ($search['results'] as $payment) {
-        if (($payment['status'] ?? '') !== 'approved') {
-            continue;
-        }
-
-        $paymentId = (string) ($payment['id'] ?? '');
-        if ($paymentId === '') {
-            continue;
-        }
-
-        $exists = Capsule::table('tblaccounts')
-            ->where('invoiceid', $invoiceId)
-            ->where('transid', $paymentId)
-            ->exists();
-
-        if (!$exists) {
-            $amount = (float) ($payment['transaction_amount'] ?? 0);
-            $fee    = (float) ($payment['fee_details'][0]['amount'] ?? 0);
-
-            addInvoicePayment($invoiceId, $paymentId, $amount, $fee, SEIXASTEC_MP_MODULE);
-            logTransaction(SEIXASTEC_MP_MODULE, $payment, 'Sincronização manual via admin');
+        if (_seixastec_mp_apply_approved_payment($invoiceId, $payment, $gateway, 'AdminSync')) {
             $applied++;
         }
     }
@@ -528,6 +499,82 @@ function _seixastec_mp_sync_invoice(int $invoiceId): array
     }
 
     return ['success' => true, 'message' => 'Fatura já está sincronizada (nenhum pagamento novo).'];
+}
+
+/**
+ * Aplica pagamento aprovado somente se o valor bater com a fatura.
+ *
+ * @param array<string, mixed> $payment
+ * @param array<string, mixed> $gateway
+ */
+function _seixastec_mp_apply_approved_payment(int $invoiceId, array $payment, array $gateway, string $source): bool
+{
+    if (($payment['status'] ?? '') !== 'approved') {
+        return false;
+    }
+
+    $paymentId = (string) ($payment['id'] ?? '');
+    if ($invoiceId <= 0 || $paymentId === '') {
+        return false;
+    }
+
+    $exists = Capsule::table('tblaccounts')
+        ->where('invoiceid', $invoiceId)
+        ->where('transid', $paymentId)
+        ->exists();
+
+    if ($exists) {
+        return false;
+    }
+
+    $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+    if (!$invoice) {
+        return false;
+    }
+
+    $amount = (float) ($payment['transaction_amount'] ?? 0);
+    $expected = InvoiceAmount::expected(
+        (float) $invoice->total,
+        (float) ($gateway['feePercent'] ?? 0)
+    );
+
+    if (!InvoiceAmount::matches($amount, $expected)) {
+        _seixastec_mp_log($source . ' AMOUNT MISMATCH', [
+            'payment_id' => $paymentId,
+            'invoice_id' => $invoiceId,
+            'expected'   => $expected,
+            'received'   => $amount,
+        ]);
+        try {
+            $current = Capsule::table('tblinvoices')->where('id', $invoiceId)->value('notes') ?? '';
+            $note = sprintf(
+                '[%s] ALERTA: Pagamento %s com valor R$ %s divergente do esperado R$ %s (%s). Verificar manualmente.',
+                date('Y-m-d H:i:s'),
+                $paymentId,
+                number_format($amount, 2, ',', '.'),
+                number_format($expected, 2, ',', '.'),
+                $source
+            );
+            Capsule::table('tblinvoices')->where('id', $invoiceId)->update([
+                'notes' => trim((string) $current . "\n" . $note),
+            ]);
+        } catch (\Throwable $e) {
+            // nota administrativa é best-effort
+        }
+
+        return false;
+    }
+
+    $fee = (float) ($payment['fee_details'][0]['amount'] ?? 0);
+    addInvoicePayment($invoiceId, $paymentId, $amount, $fee, SEIXASTEC_MP_MODULE);
+    logTransaction(SEIXASTEC_MP_MODULE, $payment, 'Sincronizado via ' . $source);
+    try {
+        TransactionStore::save($invoiceId, $payment, (string) ($payment['payment_method_id'] ?? ''), $amount);
+    } catch (\Throwable $e) {
+        // auditoria local não bloqueia o pagamento
+    }
+
+    return true;
 }
 
 /**

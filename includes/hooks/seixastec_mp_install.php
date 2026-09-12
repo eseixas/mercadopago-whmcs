@@ -45,20 +45,7 @@ if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
-/** Versão atual do schema — incrementar a cada nova migration. */
-const SEIXASTEC_MP_SCHEMA_VERSION = 2;
-
-/** Nome interno do módulo. */
-const SEIXASTEC_MP_MODULE = 'seixastec_mercadopago';
-
-/** Nome da tabela principal. */
-const SEIXASTEC_MP_TABLE = 'mod_seixastec_mp_transactions';
-
-/** Chave de configuração para versão instalada. */
-const SEIXASTEC_MP_VERSION_KEY = 'seixastec_mp_schema_version';
-
-/** Chave de configuração para timestamp da última verificação. */
-const SEIXASTEC_MP_LASTCHECK_KEY = 'seixastec_mp_schema_lastcheck';
+require_once dirname(__DIR__, 2) . '/modules/gateways/seixastec_mercadopago/constants.php';
 
 // =======================================================================
 // HOOK 1: AfterModuleActivate (ativação do gateway)
@@ -177,7 +164,7 @@ function seixastec_mp_runMigrations(bool $verbose = false): void
     $migrations = [
         1 => 'seixastec_mp_migration_v1_createTable',
         2 => 'seixastec_mp_migration_v2_addIndexes',
-        // 3 => 'seixastec_mp_migration_v3_...' (adicione futuras aqui)
+        3 => 'seixastec_mp_migration_v3_allowMultiplePayments',
     ];
 
     foreach ($migrations as $version => $callback) {
@@ -220,11 +207,11 @@ function seixastec_mp_migration_v1_createTable(): void
         $table->bigIncrements('id');
 
         // Vínculos
-        $table->unsignedInteger('invoice_id')->unique()
+        $table->unsignedInteger('invoice_id')->index()
             ->comment('ID da fatura no WHMCS (tblinvoices.id)');
         $table->string('preference_id', 100)->nullable()
             ->comment('ID da preferência no Mercado Pago');
-        $table->string('payment_id', 100)->nullable()
+        $table->string('payment_id', 100)->nullable()->unique()
             ->comment('ID do pagamento no Mercado Pago');
 
         // Pagamento
@@ -276,7 +263,10 @@ function seixastec_mp_migration_v2_addIndexes(): void
     $existing = seixastec_mp_getExistingIndexes(SEIXASTEC_MP_TABLE);
 
     $schema->table(SEIXASTEC_MP_TABLE, function ($table) use ($existing) {
-        if (!in_array('idx_mp_payment_id', $existing, true)) {
+        if (!in_array('idx_mp_payment_id', $existing, true)
+            && !in_array('unq_mp_payment_id', $existing, true)
+            && !in_array('mod_seixastec_mp_transactions_payment_id_unique', $existing, true)
+        ) {
             $table->index('payment_id', 'idx_mp_payment_id');
         }
         if (!in_array('idx_mp_preference_id', $existing, true)) {
@@ -289,6 +279,66 @@ function seixastec_mp_migration_v2_addIndexes(): void
             $table->index('created_at', 'idx_mp_created_at');
         }
     });
+}
+
+/**
+ * Migration v3 — várias transações por fatura (PIX depois cartão, retentativas).
+ * Remove UNIQUE de invoice_id e garante UNIQUE em payment_id.
+ */
+function seixastec_mp_migration_v3_allowMultiplePayments(): void
+{
+    $schema = Capsule::schema();
+    if (!$schema->hasTable(SEIXASTEC_MP_TABLE)) {
+        return;
+    }
+
+    $existing = seixastec_mp_getExistingIndexes(SEIXASTEC_MP_TABLE);
+
+    $invoiceUniques = [
+        'mod_seixastec_mp_transactions_invoice_id_unique',
+        'invoice_id',
+    ];
+    foreach ($invoiceUniques as $indexName) {
+        if (!in_array($indexName, $existing, true)) {
+            continue;
+        }
+        try {
+            $schema->table(SEIXASTEC_MP_TABLE, function ($table) use ($indexName) {
+                $table->dropUnique($indexName);
+            });
+        } catch (\Throwable $e) {
+            try {
+                Capsule::statement('ALTER TABLE `' . SEIXASTEC_MP_TABLE . '` DROP INDEX `' . $indexName . '`');
+            } catch (\Throwable $ignored) {
+                // índice pode já ter outro nome
+            }
+        }
+    }
+
+    $existing = seixastec_mp_getExistingIndexes(SEIXASTEC_MP_TABLE);
+    if (!in_array('idx_mp_invoice_id', $existing, true)) {
+        try {
+            $schema->table(SEIXASTEC_MP_TABLE, function ($table) {
+                $table->index('invoice_id', 'idx_mp_invoice_id');
+            });
+        } catch (\Throwable $e) {
+            // já existe índice em invoice_id
+        }
+    }
+
+    $existing = seixastec_mp_getExistingIndexes(SEIXASTEC_MP_TABLE);
+    $hasPaymentUnique = in_array('unq_mp_payment_id', $existing, true)
+        || in_array('mod_seixastec_mp_transactions_payment_id_unique', $existing, true);
+
+    if (!$hasPaymentUnique) {
+        try {
+            $schema->table(SEIXASTEC_MP_TABLE, function ($table) {
+                $table->unique('payment_id', 'unq_mp_payment_id');
+            });
+        } catch (\Throwable $e) {
+            // payment_id duplicado legado — mantém índice simples
+        }
+    }
 }
 
 // =======================================================================

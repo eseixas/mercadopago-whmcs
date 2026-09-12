@@ -20,12 +20,21 @@ declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\BrazilAddress;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\InvoiceAmount;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\TransactionStore;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\Validator;
 
 // Bootstrap WHMCS
 require_once __DIR__ . '/../../../init.php';
 require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
+require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/Api.php';
+require_once __DIR__ . '/InvoiceAmount.php';
+require_once __DIR__ . '/TransactionStore.php';
+require_once __DIR__ . '/Validator.php';
+require_once __DIR__ . '/BrazilAddress.php';
 
 // ---------------------------------------------------------------------------
 // Configurações de resposta
@@ -152,7 +161,7 @@ try {
 // ---------------------------------------------------------------------------
 $baseAmount = (float) $invoice->total;
 $taxa       = (float) ($gateway['feePercent'] ?? 0);
-$amount     = $taxa > 0 ? round($baseAmount * (1 + $taxa / 100), 2) : $baseAmount;
+$amount     = InvoiceAmount::expected($baseAmount, $taxa);
 
 if ($amount <= 0) {
     respond(false, 'Valor da fatura inválido.', [], 400);
@@ -210,10 +219,10 @@ if (!is_array($identification) || empty($identification['number'])) {
             ->whereIn('f.fieldname', ['CPF', 'CNPJ', 'CPF/CNPJ', 'Documento'])
             ->value('v.value');
 
-        $docNumber = preg_replace('/\D/', '', (string) $docFromCf);
-        if ($docNumber !== '' && (strlen($docNumber) === 11 || strlen($docNumber) === 14)) {
+        $docNumber = Validator::sanitize((string) $docFromCf);
+        if (Validator::validate($docNumber)) {
             $identification = [
-                'type'   => strlen($docNumber) === 11 ? 'CPF' : 'CNPJ',
+                'type'   => Validator::detectType($docNumber),
                 'number' => $docNumber,
             ];
         }
@@ -223,9 +232,10 @@ if (!is_array($identification) || empty($identification['number'])) {
 }
 
 if (is_array($identification) && !empty($identification['number'])) {
+    $docNumber = Validator::sanitize((string) $identification['number']);
     $basePayload['payer']['identification'] = [
-        'type'   => strtoupper((string) ($identification['type'] ?? 'CPF')),
-        'number' => preg_replace('/\D/', '', (string) $identification['number']),
+        'type'   => Validator::validate($docNumber) ? Validator::detectType($docNumber) : strtoupper((string) ($identification['type'] ?? 'CPF')),
+        'number' => $docNumber,
     ];
 }
 
@@ -239,21 +249,21 @@ try {
 
     // ---- PIX ----
     if (in_array($paymentTypeNormalized, ['bank_transfer', 'pix'], true)) {
-        $pixExpirationMinutes = max(5, (int) ($gateway['pixExpiration'] ?? 30));
+        $pixExpirationMinutes = max(5, min(1440, (int) ($gateway['pixExpirationMinutes'] ?? $gateway['pixExpiration'] ?? 60)));
 
         $payload = array_merge($basePayload, [
             'payment_method_id'  => 'pix',
             'date_of_expiration' => date('Y-m-d\TH:i:s.000P', time() + ($pixExpirationMinutes * 60)),
         ]);
 
-        $result = $api->createPayment($payload);
+        $result = $api->createPayment($payload, $idempotencyKey);
         mpLog('PIX_CREATE', $payload, $result ?? $api->getLastError());
 
         if (!$result || empty($result['id'])) {
             respond(false, 'Falha ao gerar PIX: ' . ($api->getLastError() ?? 'erro desconhecido'), [], 502);
         }
 
-        storeTransaction($invoiceId, $result, 'pix', $amount);
+        TransactionStore::save($invoiceId, $result, 'pix', $amount);
 
         $poi = $result['point_of_interaction']['transaction_data'] ?? [];
 
@@ -287,21 +297,21 @@ try {
             $payload['payer']['address'] = [
                 'zip_code'      => preg_replace('/\D/', '', (string) $client->postcode),
                 'street_name'   => (string) $client->address1,
-                'street_number' => (string) ($client->address2 ?: 'S/N'),
-                'neighborhood'  => (string) ($client->state ?: 'Centro'),
+                'street_number' => BrazilAddress::streetNumber((string) $client->address1),
+                'neighborhood'  => (string) ($client->address2 ?: 'Centro'),
                 'city'          => (string) $client->city,
-                'federal_unit'  => substr((string) $client->state, 0, 2),
+                'federal_unit'  => BrazilAddress::federalUnit((string) $client->state),
             ];
         }
 
-        $result = $api->createPayment($payload);
+        $result = $api->createPayment($payload, $idempotencyKey);
         mpLog('BOLETO_CREATE', $payload, $result ?? $api->getLastError());
 
         if (!$result || empty($result['id'])) {
             respond(false, 'Falha ao gerar boleto: ' . ($api->getLastError() ?? 'erro'), [], 502);
         }
 
-        storeTransaction($invoiceId, $result, 'ticket', $amount);
+        TransactionStore::save($invoiceId, $result, 'ticket', $amount);
 
         $td = $result['transaction_details'] ?? [];
 
@@ -343,7 +353,7 @@ try {
             $payload['issuer_id'] = (string) $issuerId;
         }
 
-        $result = $api->createPayment($payload);
+        $result = $api->createPayment($payload, $idempotencyKey);
         mpLog('CARD_CREATE', $payload, $result ?? $api->getLastError());
 
         if (!$result || empty($result['id'])) {
@@ -353,7 +363,7 @@ try {
         $status       = (string) ($result['status'] ?? 'pending');
         $statusDetail = (string) ($result['status_detail'] ?? '');
 
-        storeTransaction($invoiceId, $result, 'card', $amount);
+        TransactionStore::save($invoiceId, $result, 'card', $amount);
 
         // Aprovado imediatamente? Já registra no WHMCS (otimização de UX)
         if ($status === 'approved') {
@@ -389,27 +399,6 @@ try {
 // ===========================================================================
 // HELPERS
 // ===========================================================================
-
-/**
- * Persiste a transação na tabela local de auditoria.
- */
-function storeTransaction(int $invoiceId, array $payment, string $method, float $amount): void
-{
-    try {
-        Capsule::table('mod_seixastec_mp_transactions')->updateOrInsert(
-            ['payment_id' => (string) $payment['id']],
-            [
-                'invoice_id'  => $invoiceId,
-                'status'      => (string) ($payment['status'] ?? 'pending'),
-                'method'      => $method,
-                'amount'      => $amount,
-                'updated_at'  => date('Y-m-d H:i:s'),
-            ]
-        );
-    } catch (Throwable $e) {
-        // Auditoria silenciosa — não impede o fluxo
-    }
-}
 
 /**
  * Registra pagamento no WHMCS evitando duplicidade.

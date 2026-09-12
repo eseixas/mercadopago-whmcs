@@ -15,12 +15,15 @@ declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\InvoiceAmount;
 
 // Bootstrap WHMCS
 require_once __DIR__ . '/../../../init.php';
 require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
+require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/Api.php';
+require_once __DIR__ . '/InvoiceAmount.php';
 
 // ---------------------------------------------------------------------------
 // 1. Validação inicial
@@ -93,11 +96,8 @@ try {
 // ---------------------------------------------------------------------------
 // 4. Calcula valor (com taxa adicional, se houver)
 // ---------------------------------------------------------------------------
-$amount = (float) $invoice->total;
 $taxa = (float) ($gateway['feePercent'] ?? 0);
-if ($taxa > 0) {
-    $amount = round($amount * (1 + $taxa / 100), 2);
-}
+$amount = InvoiceAmount::expected((float) $invoice->total, $taxa);
 
 if ($amount <= 0) {
     exit('Valor da fatura inválido.');
@@ -106,12 +106,12 @@ if ($amount <= 0) {
 // ---------------------------------------------------------------------------
 // 5. Define métodos de pagamento exibidos
 // ---------------------------------------------------------------------------
-$methods = $gateway['paymentMethods'] ?? 'all';
+$methods = (string) ($gateway['paymentMode'] ?? $gateway['paymentMethods'] ?? 'checkout_pro');
 $paymentMethodsConfig = [
     'creditCard'    => 'all',
     'debitCard'     => 'all',
     'ticket'        => 'all',
-    'bankTransfer'  => 'all', // PIX
+    'bankTransfer'  => 'all',
     'atm'           => 'all',
     'maxInstallments' => (int) ($gateway['maxInstallments'] ?? 12),
 ];
@@ -123,19 +123,21 @@ switch ($methods) {
         $paymentMethodsConfig['ticket']       = 'none';
         $paymentMethodsConfig['atm']          = 'none';
         break;
-    case 'card':
-        $paymentMethodsConfig['ticket']       = 'none';
-        $paymentMethodsConfig['bankTransfer'] = 'none';
-        $paymentMethodsConfig['atm']          = 'none';
-        break;
+    case 'boleto':
     case 'ticket':
         $paymentMethodsConfig['creditCard']   = 'none';
         $paymentMethodsConfig['debitCard']    = 'none';
         $paymentMethodsConfig['bankTransfer'] = 'none';
         $paymentMethodsConfig['atm']          = 'none';
         break;
-    case 'pix_card':
+    case 'pix_boleto':
+        $paymentMethodsConfig['creditCard']   = 'none';
+        $paymentMethodsConfig['debitCard']    = 'none';
+        $paymentMethodsConfig['atm']          = 'none';
+        break;
+    case 'card':
         $paymentMethodsConfig['ticket']       = 'none';
+        $paymentMethodsConfig['bankTransfer'] = 'none';
         $paymentMethodsConfig['atm']          = 'none';
         break;
 }
@@ -170,7 +172,7 @@ try {
 // ---------------------------------------------------------------------------
 // 8. Headers de segurança (VULN-16 FIX)
 // ---------------------------------------------------------------------------
-header("Content-Security-Policy: default-src 'self'; script-src 'self' https://sdk.mercadopago.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; font-src https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self' https://api.mercadopago.com;");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://sdk.mercadopago.com https://http2.mlstatic.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://http2.mlstatic.com; font-src 'self' data: https://cdnjs.cloudflare.com https://http2.mlstatic.com; img-src 'self' data: https://http2.mlstatic.com https://*.mercadopago.com; connect-src 'self' https://api.mercadopago.com https://*.mercadopago.com https://*.mlstatic.com; frame-src https://www.mercadopago.com https://*.mercadopago.com https://*.mlstatic.com;");
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');

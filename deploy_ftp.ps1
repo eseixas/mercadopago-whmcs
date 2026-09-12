@@ -1,49 +1,69 @@
 # Deploy Mercado Pago WHMCS via lftp (WSL)
 # Uso: .\deploy_ftp.ps1
 
-$envFile = Get-Content ".env" -ErrorAction SilentlyContinue
-if (!$envFile) {
+$ErrorActionPreference = 'Stop'
+$repoRoot = (Resolve-Path (Split-Path -Parent $MyInvocation.MyCommand.Path)).Path
+
+$envPath = Join-Path $repoRoot '.env'
+if (-not (Test-Path $envPath)) {
     Write-Host "Arquivo .env nao encontrado!" -ForegroundColor Red
     exit 1
 }
 
-$ftpHost = ($envFile | Select-String "FTP_HOST=").ToString().Split("=")[1].Trim()
-$ftpUser = ($envFile | Select-String "FTP_USER=").ToString().Split("=")[1].Trim()
-$ftpPass = ($envFile | Select-String "FTP_PASS=").ToString().Split("=")[1].Trim()
-$ftpBase = ($envFile | Select-String "FTP_REMOTE_BASE=").ToString().Split("=")[1].Trim()
+$envMap = @{}
+Get-Content $envPath | ForEach-Object {
+    if ($_ -match '^\s*([A-Z_]+)=(.*)$') {
+        $envMap[$matches[1]] = $matches[2].Trim()
+    }
+}
 
-$localPath = "/c/Temp/code/mercadopago-whmcs"
+foreach ($key in @('FTP_HOST', 'FTP_USER', 'FTP_PASS', 'FTP_REMOTE_BASE')) {
+    if (-not $envMap.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($envMap[$key])) {
+        Write-Host "Variavel $key ausente no .env" -ForegroundColor Red
+        exit 1
+    }
+}
 
-Write-Host "Iniciando deploy para $ftpHost..." -ForegroundColor Cyan
+$ftpHost = $envMap['FTP_HOST']
+$ftpUser = $envMap['FTP_USER']
+$ftpPass = $envMap['FTP_PASS']
+$ftpBase = $envMap['FTP_REMOTE_BASE'].TrimEnd('/')
 
-wsl bash -c @"
-lftp -u '$ftpUser,$ftpPass' $ftpHost << 'EOF'
+$drive = $repoRoot.Substring(0, 1).ToLower()
+$localPath = '/mnt/' + $drive + ($repoRoot.Substring(2) -replace '\\', '/')
+
+Write-Host "Iniciando deploy para $ftpHost ..." -ForegroundColor Cyan
+
+$lftpScript = @"
 set ftp:passive-mode on
-set ssl:verify-certificate no
+set ssl:verify-certificate yes
 set net:timeout 30
 set net:max-retries 3
-
-# 1. Main Gateway File
 put $localPath/modules/gateways/seixastec_mercadopago.php -o $ftpBase/modules/gateways/seixastec_mercadopago.php
-
-# 2. Callback File
 put $localPath/modules/gateways/callback/seixastec_mercadopago.php -o $ftpBase/modules/gateways/callback/seixastec_mercadopago.php
-
-# 3. Gateway Directory (Templates, API, etc)
 mirror --reverse --verbose --no-perms $localPath/modules/gateways/seixastec_mercadopago $ftpBase/modules/gateways/seixastec_mercadopago
-
-# 4. Hooks
 put $localPath/includes/hooks/seixastec_mp_install.php -o $ftpBase/includes/hooks/seixastec_mp_install.php
 put $localPath/includes/hooks/seixastec_mp_cleanup.php -o $ftpBase/includes/hooks/seixastec_mp_cleanup.php
 put $localPath/includes/hooks/seixastec_mercadopago_pdf.php -o $ftpBase/includes/hooks/seixastec_mercadopago_pdf.php
 put $localPath/includes/hooks/seixastec_mercadopago.php -o $ftpBase/includes/hooks/seixastec_mercadopago.php
-
 bye
-EOF
 "@
 
-if ($LASTEXITCODE -eq 0) {
+$scriptLocal = Join-Path $repoRoot '.deploy.lftp'
+Set-Content -Path $scriptLocal -Value $lftpScript -Encoding ascii
+$scriptWsl = $localPath + '/.deploy.lftp'
+
+try {
+    wsl lftp -u "${ftpUser},${ftpPass}" $ftpHost -f $scriptWsl
+    if ($LASTEXITCODE -ne 0) {
+        throw "lftp exit $LASTEXITCODE"
+    }
     Write-Host "Deploy concluido com sucesso!" -ForegroundColor Green
-} else {
-    Write-Host "Deploy falhou (exit $LASTEXITCODE)" -ForegroundColor Red
+} catch {
+    Write-Host "Deploy falhou: $_" -ForegroundColor Red
+    exit 1
+} finally {
+    if (Test-Path $scriptLocal) {
+        Remove-Item $scriptLocal -Force
+    }
 }

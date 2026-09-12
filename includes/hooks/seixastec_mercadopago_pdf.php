@@ -53,13 +53,7 @@ if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
-// =======================================================================
-// CONSTANTES
-// =======================================================================
-
-const SEIXASTEC_MP_TABLE          = 'mod_seixastec_mp_transactions';
-const SEIXASTEC_MP_HOOK_VERSION   = '1.1.0';
-const SEIXASTEC_MP_GATEWAY_MODULE = 'seixastec_mercadopago';
+require_once dirname(__DIR__, 2) . '/modules/gateways/seixastec_mercadopago/constants.php';
 
 // =======================================================================
 // HOOK 1: PDF DA FATURA

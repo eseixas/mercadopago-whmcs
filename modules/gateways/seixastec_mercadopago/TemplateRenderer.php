@@ -52,6 +52,7 @@ class TemplateRenderer
 
         try {
             $smarty = self::getSmarty();
+            $smarty->clearAllAssign();
             $smarty->assign($data);
             return (string) $smarty->fetch($path);
         } catch (\Throwable $e) {

@@ -11,7 +11,7 @@
         "features": [
             "Integração com o MercadoPago.",
             "Todos os métodos de pagamento disponíveis na sua conta do MercadoPago.",
-            "Retorno automática usando webhoook."
+            "Retorno automático usando webhook."
         ]
     },
     "logo": {
