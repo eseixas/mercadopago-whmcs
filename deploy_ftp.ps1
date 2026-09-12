@@ -29,14 +29,19 @@ $ftpUser = $envMap['FTP_USER']
 $ftpPass = $envMap['FTP_PASS']
 $ftpBase = $envMap['FTP_REMOTE_BASE'].TrimEnd('/')
 
-$drive = $repoRoot.Substring(0, 1).ToLower()
-$localPath = '/mnt/' + $drive + ($repoRoot.Substring(2) -replace '\\', '/')
+$winPath = ($repoRoot -replace '\\', '/')
+$localPath = (wsl -- wslpath -a "$winPath").Trim()
+if ([string]::IsNullOrWhiteSpace($localPath)) {
+    Write-Host "Falha ao converter caminho para WSL (wslpath)." -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "Iniciando deploy para $ftpHost ..." -ForegroundColor Cyan
 
 $lftpScript = @"
 set ftp:passive-mode on
-set ssl:verify-certificate yes
+# Hostinger/Nitmail FTP apresenta certificado TLS com emissor desconhecido.
+set ssl:verify-certificate no
 set net:timeout 30
 set net:max-retries 3
 put $localPath/modules/gateways/seixastec_mercadopago.php -o $ftpBase/modules/gateways/seixastec_mercadopago.php
@@ -54,7 +59,7 @@ Set-Content -Path $scriptLocal -Value $lftpScript -Encoding ascii
 $scriptWsl = $localPath + '/.deploy.lftp'
 
 try {
-    wsl lftp -u "${ftpUser},${ftpPass}" $ftpHost -f $scriptWsl
+    wsl -- bash -lc "lftp -u '${ftpUser},${ftpPass}' '$ftpHost' < '$scriptWsl'"
     if ($LASTEXITCODE -ne 0) {
         throw "lftp exit $LASTEXITCODE"
     }
