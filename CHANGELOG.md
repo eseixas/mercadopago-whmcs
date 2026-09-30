@@ -6,6 +6,29 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.
 
 ---
 
+## [2.4.2] - 2026-09-30
+
+### Segurança
+
+- Checkout Brick protegido por token CSRF aleatório de 256 bits, armazenado na sessão inicializada pelo WHMCS e vinculado ao cliente autenticado. Token ausente, inválido ou de outra sessão retorna HTTP 403 antes de consultar faturas ou criar pagamentos.
+- Token estável entre abas e tentativas da mesma sessão; alteração de cliente exige novo token. O token do cartão em `form_data.token` permanece separado e intacto.
+- Proteções existentes de POST, sessão, header AJAX, propriedade/estado da fatura e idempotência preservadas. Checkout não deve ser armazenado em cache; token CSRF é removido antes dos logs de diagnóstico.
+- Endurecimento preventivo: não foi demonstrada exploração em produção. Não foi adicionada restrição baseada em `Origin`/`systemurl`, pois aliases e proxies da instalação precisam de avaliação própria.
+
+### Atualização
+
+- Instalar juntos `CheckoutCsrf.php`, `pay.php` e `process.php` em `modules/gateways/seixastec_mercadopago/`; atualizar também a identificação de versão do gateway e `whmcs.json`.
+- Checkouts abertos antes da atualização precisam ser recarregados. Não há migração de banco, troca de credenciais ou mudança no schema nesta versão.
+
+### Testes
+
+- PHP 8.3.33: 17 testes PHPUnit/48 assertions, 53 verificações HTTP isoladas com mocks e PHPStan sem erros. Cobertura não executada por ausência de driver; usar `composer test -- --no-coverage` nesse ambiente.
+- Novo `composer test:security`: tokens ausente/incorreto/de outra sessão, sessão expirada, propriedade da fatura e zero chamadas simuladas nas rejeições; PIX, boleto, crédito/débito, duas abas e retry com idempotência.
+- O check global `composer cs:check` reprova diferenças de estilo em arquivos preexistentes e novos; não foi realizada refatoração ampla de estilo nesta correção. O CI completo não está aprovado.
+- Sem pagamentos reais, chamadas à API Mercado Pago ou QA completo em WHMCS/browser real. Requisitos de PHP 8.2+ e WHMCS 8.10+/9.x mantidos; esta rodada local não executou a matriz PHP 8.2/8.4.
+
+---
+
 ## [2.4.1] — 2026-09-11
 
 ### 🔒 Segurança

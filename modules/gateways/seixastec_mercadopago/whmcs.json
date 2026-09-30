@@ -2,6 +2,7 @@
     "schema": "1.0",
     "type": "whmcs-gateways",
     "name": "seixastec_mercadopago",
+    "version": "2.4.2",
     "license": "GPL-3.0",
     "category": "payments",
     "description": {

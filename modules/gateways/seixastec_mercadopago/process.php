@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\CheckoutCsrf;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\BrazilAddress;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\InvoiceAmount;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\TransactionStore;
@@ -31,6 +32,7 @@ require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/Api.php';
+require_once __DIR__ . '/CheckoutCsrf.php';
 require_once __DIR__ . '/InvoiceAmount.php';
 require_once __DIR__ . '/TransactionStore.php';
 require_once __DIR__ . '/Validator.php';
@@ -83,7 +85,7 @@ if (!isset($_SESSION['uid']) || (int) $_SESSION['uid'] <= 0) {
 }
 $clientId = (int) $_SESSION['uid'];
 
-// Header AJAX obrigatório (mitiga CSRF básico)
+// Header AJAX obrigatório (defesa adicional ao token CSRF)
 $xhr = $_SERVER['HTTP_X_REQUESTED_WITH'] ?? '';
 if (strcasecmp($xhr, 'XMLHttpRequest') !== 0) {
     respond(false, 'Requisição inválida.', [], 400);
@@ -98,6 +100,13 @@ $input   = json_decode($rawBody, true);
 if (!is_array($input) || json_last_error() !== JSON_ERROR_NONE) {
     respond(false, 'Payload JSON inválido.', [], 400);
 }
+
+// Validate before gateway/database access or any payment API call.
+if (!CheckoutCsrf::valid($_SESSION, $input['csrf_token'] ?? null)) {
+    respond(false, 'Token de seguranca invalido. Recarregue o checkout.', [], 403);
+}
+// Keep the session secret out of later diagnostic logs.
+unset($input['csrf_token']);
 
 $invoiceId           = (int) ($input['invoice_id'] ?? 0);
 $selectedPaymentType = (string) ($input['payment_method'] ?? '');
