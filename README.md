@@ -21,6 +21,15 @@ Aceite pagamentos via **Pix**, **Cartão de Crédito**, **Boleto** e **Saldo Mer
 
 </div>
 
+
+## Atualização de segurança 2.4.2
+
+O checkout Brick envia um token CSRF próprio no campo JSON `csrf_token`, separado do token do cartão. O endpoint exige a sessão autenticada, o header AJAX, o token dessa sessão e uma fatura do cliente. O token permanece válido entre abas e retries; checkouts abertos antes da atualização devem ser recarregados.
+
+Para atualizar da 2.4.1, faça backup fora do webroot e instale juntos `CheckoutCsrf.php`, `pay.php` e `process.php`, mais a identificação de versão em `modules/gateways/seixastec_mercadopago.php` e `modules/gateways/seixastec_mercadopago/whmcs.json`. Preserve suas configurações e customizações. Não é necessário desativar o gateway, trocar credenciais ou migrar o banco. O schema existente permanece na versão 3.
+
+Compatibilidade declarada: PHP 8.2+ e WHMCS 8.10+/9.x. Testado localmente com PHP 8.3.33, mocks e nenhum pagamento real. Não foi comprovada exploração em produção; aliases, proxies, CORS e integrações de browser/WHMCS precisam de validação na instalação.
+
 ---
 
 ## 📑 Índice
@@ -99,60 +108,24 @@ php-curl  php-json  php-openssl  php-mbstring  php-bcmath
 
 ---
 
-## 📦 Instalação
+## Instalação
 
-### Método 1 — Via Marketplace WHMCS (recomendado) 🛒
+1. Baixe o ZIP do [Release 2.4.2](https://github.com/eseixas/mercadopago-whmcs/releases/tag/v2.4.2) e confira o SHA-256 publicado.
+2. Extraia a pasta `mercadopago-whmcs/`. Copie **somente** suas pastas `modules/` e `includes/` para a raiz do WHMCS, mantendo esta estrutura:
 
-> 🔜 Em breve disponível no WHMCS Marketplace
-
-### Método 2 — Via ZIP (manual)
-
-1. **Baixe a última release**
-
-   ```bash
-   wget https://github.com/eseixas/mercadopago-whmcs/releases/latest/download/mercadopago-whmcs.zip
-   ```
-
-2. **Extraia o conteúdo**
-
-   ```bash
-   unzip mercadopago-whmcs.zip
-   ```
-
-3. **Envie via FTP/SSH para o diretório do WHMCS**
-
-   ```
-   /caminho/do/whmcs/modules/gateways/
-   ├── mercadopago.php
-   └── mercadopago/
-       ├── lib/
-       ├── callback/
-       └── ...
-   ```
-
-4. **Aplique permissões corretas**
-
-   ```bash
-   cd /caminho/do/whmcs/modules/gateways/
-   chown -R www-data:www-data mercadopago mercadopago.php
-   chmod -R 644 mercadopago mercadopago.php
-   find mercadopago -type d -exec chmod 755 {} \;
-   ```
-
-### Método 3 — Via Composer (para desenvolvedores)
-
-```bash
-cd /caminho/do/whmcs/
-composer require eseixas/mercadopago-whmcs
+```text
+modules/gateways/seixastec_mercadopago.php
+modules/gateways/seixastec_mercadopago/        # classes, checkout e templates
+modules/gateways/callback/seixastec_mercadopago.php
+includes/hooks/seixastec_mercadopago.php
+includes/hooks/seixastec_mercadopago_pdf.php
+includes/hooks/seixastec_mp_install.php
+includes/hooks/seixastec_mp_cleanup.php
 ```
 
-### Método 4 — Via Git (instalação de desenvolvimento)
-
-```bash
-cd /caminho/do/whmcs/modules/gateways/
-git clone https://github.com/eseixas/mercadopago-whmcs.git mercadopago-src
-cp -r mercadopago-src/modules/gateways/* .
-```
+3. Mantenha proprietário/permissões compatíveis com o usuário do PHP no servidor. Não publique testes, scripts de deploy, arquivos `.env`, relatórios locais ou dependências de desenvolvimento.
+4. No admin, abra os gateways e configure **Mercado Pago (SeixasTec)**. Em uma instalação nova, confira as tabelas e hooks seguindo o fluxo existente do módulo.
+5. Para atualização, use o procedimento 2.4.1 → 2.4.2 acima, confira `php -l` e mantenha o backup para rollback. Validar telas e rejeições não exige criar pagamentos.
 
 ---
 
@@ -187,15 +160,9 @@ cp -r mercadopago-src/modules/gateways/* .
 
 5. Clique em **Save Changes**
 
-### 3️⃣ Configurar Cron (essencial!)
+### Cron do WHMCS
 
-Adicione ao crontab do servidor:
-
-```bash
-*/5 * * * * php -q /caminho/do/whmcs/modules/gateways/mercadopago/cron/check_pending.php >/dev/null 2>&1
-```
-
-> 💡 Esse cron verifica pagamentos pendentes a cada 5 minutos como **fallback** caso o webhook falhe.
+Mantenha o cron padrão do WHMCS configurado. O módulo usa os hooks `DailyCronJob` para as tarefas previstas; não existe `modules/gateways/mercadopago/cron/check_pending.php` neste repositório. Não execute sincronização de pagamentos como teste de atualização.
 
 ---
 
@@ -207,7 +174,7 @@ Adicione ao crontab do servidor:
 2. Adicione a URL:
 
    ```
-   https://seudominio.com/modules/gateways/callback/mercadopago.php
+   https://seudominio.com/modules/gateways/callback/seixastec_mercadopago.php
    ```
 
 3. Selecione os eventos:
@@ -220,7 +187,7 @@ Adicione ao crontab do servidor:
 
 ```bash
 # Teste manual (a partir do painel do MP)
-curl -X POST https://seudominio.com/modules/gateways/callback/mercadopago.php \
+curl -X POST https://seudominio.com/modules/gateways/callback/seixastec_mercadopago.php \
   -H "Content-Type: application/json" \
   -H "x-signature: ts=1234567890,v1=..." \
   -d '{"type":"payment","data":{"id":"123456789"}}'
@@ -268,8 +235,9 @@ Para testar sem cobrar de verdade:
 Copie o template padrão e edite:
 
 ```bash
-cp modules/gateways/mercadopago/templates/checkout.tpl \
-   templates/seu-tema/mercadopago-checkout.tpl
+mkdir -p templates/seu-tema/seixastec_mercadopago
+cp modules/gateways/seixastec_mercadopago/templates/checkout_pro.tpl \
+   templates/seu-tema/seixastec_mercadopago/checkout_pro.tpl
 ```
 
 ### Hooks disponíveis
@@ -342,7 +310,7 @@ $_LANG['mercadopago']['credit_card'] = 'Cartão de crédito';
 **Diagnóstico:**
 ```bash
 # 1. Testar URL manualmente
-curl -I https://seudominio.com/modules/gateways/callback/mercadopago.php
+curl -I https://seudominio.com/modules/gateways/callback/seixastec_mercadopago.php
 
 # 2. Verificar logs do Apache/Nginx
 tail -f /var/log/apache2/access.log | grep mercadopago
@@ -369,7 +337,7 @@ tail -f /var/log/apache2/access.log | grep mercadopago
    ```
 2. Verifique permissões dos arquivos:
    ```bash
-   ls -la modules/gateways/mercadopago/
+   ls -la modules/gateways/seixastec_mercadopago/
    ```
 3. Habilite **logs detalhados** no gateway e reproduza o erro
 4. Verifique o **Gateway Log** em **Utilities → Logs**
@@ -458,30 +426,23 @@ composer test:coverage   # Roda testes com cobertura
 composer phpstan         # Análise estática
 composer cs:check        # Verifica code style
 composer cs:fix          # Corrige code style automaticamente
-composer quality         # Roda tudo (cs + phpstan + tests)
+composer qa              # Roda cs:check, phpstan e tests
 ```
 
 ### Estrutura do projeto
 
-```
-mercadopago-whmcs/
-├── modules/gateways/
-│   ├── mercadopago.php           # Entry point WHMCS
-│   ├── mercadopago/
-│   │   ├── lib/                  # Classes principais (PSR-4)
-│   │   │   ├── Client/           # Cliente HTTP MP
-│   │   │   ├── Gateway/          # Lógica do gateway
-│   │   │   ├── Webhook/          # Handler do webhook
-│   │   │   └── Support/          # Helpers
-│   │   ├── callback/             # Callback URL
-│   │   ├── cron/                 # Tarefas agendadas
-│   │   ├── templates/            # Templates Smarty
-│   │   └── lang/                 # Traduções
-├── src/                          # Código compartilhado
-├── tests/                        # Testes PHPUnit
-├── docs/                         # Documentação
-├── .github/                      # Workflows e templates
-└── composer.json
+```text
+modules/gateways/seixastec_mercadopago.php
+modules/gateways/seixastec_mercadopago/
+    Api.php, CheckoutCsrf.php, InvoiceAmount.php, TransactionStore.php
+    Validator.php, BrazilAddress.php, WebhookSignature.php, TemplateRenderer.php
+    constants.php, pay.php, process.php, templates/, whmcs.json
+modules/gateways/callback/seixastec_mercadopago.php
+includes/hooks/
+tests/Unit/
+tests/Security/           # regressão HTTP com mocks, sem API real
+scripts/build-release.php
+composer.json
 ```
 
 ---
@@ -555,3 +516,19 @@ Se este projeto te ajudou, considere:
 [⬆ Voltar ao topo](#-mercado-pago-gateway-for-whmcs)
 
 </div>
+
+
+## Testes isolados da versão 2.4.2
+
+No checkout de desenvolvimento:
+
+```bash
+composer install --no-scripts --no-plugins
+composer test -- --no-coverage
+composer test:security
+composer phpstan
+```
+
+`test:security` inicia um servidor apenas em `127.0.0.1`, copia os endpoints reais para uma fixture e substitui WHMCS, banco e API por mocks. Não usa credenciais nem API Mercado Pago reais. Os 53 checks cobrem tokens ausente/incorreto/de outra sessão, expiração, propriedade da fatura, rejeições sem chamadas simuladas, PIX/boleto/cartão, duas abas e retry. O servidor é encerrado ao terminar.
+
+Nesta rodada: PHPUnit 17 testes/48 assertions e PHPStan sem erros. A execução padrão `composer test` retornou aviso por ausência de driver de cobertura; `--no-coverage` passou. Cobertura, QA completo, matriz PHP 8.2/8.4 e WHMCS/browser real não foram executados localmente.

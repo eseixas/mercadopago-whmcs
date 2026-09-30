@@ -15,6 +15,7 @@ declare(strict_types=1);
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\Api;
+use WHMCS\Module\Gateway\SeixastecMercadoPago\CheckoutCsrf;
 use WHMCS\Module\Gateway\SeixastecMercadoPago\InvoiceAmount;
 
 // Bootstrap WHMCS
@@ -23,6 +24,7 @@ require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/Api.php';
+require_once __DIR__ . '/CheckoutCsrf.php';
 require_once __DIR__ . '/InvoiceAmount.php';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +60,7 @@ if (!isset($_SESSION['uid']) || (int) $_SESSION['uid'] <= 0) {
     exit;
 }
 $clientId = (int) $_SESSION['uid'];
+$checkoutCsrfToken = CheckoutCsrf::token($_SESSION);
 
 // ---------------------------------------------------------------------------
 // 3. Carrega dados da fatura
@@ -175,6 +178,7 @@ try {
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://sdk.mercadopago.com https://http2.mlstatic.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://http2.mlstatic.com; font-src 'self' data: https://cdnjs.cloudflare.com https://http2.mlstatic.com; img-src 'self' data: https://http2.mlstatic.com https://*.mercadopago.com; connect-src 'self' https://api.mercadopago.com https://*.mercadopago.com https://*.mlstatic.com; frame-src https://www.mercadopago.com https://*.mercadopago.com https://*.mlstatic.com;");
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
+header('Cache-Control: no-store, no-cache, must-revalidate');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 
 // ---------------------------------------------------------------------------
@@ -377,6 +381,7 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
                                 'X-Requested-With': 'XMLHttpRequest'
                             },
                             body: JSON.stringify({
+                                csrf_token: <?= json_encode($checkoutCsrfToken, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
                                 invoice_id: <?= (int) $invoiceId ?>,
                                 payment_method: selectedPaymentMethod,
                                 form_data: formData

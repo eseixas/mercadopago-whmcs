@@ -2,6 +2,7 @@ parameters:
     level: 6
     paths:
         - modules/gateways/seixastec_mercadopago/Api.php
+        - modules/gateways/seixastec_mercadopago/CheckoutCsrf.php
         - modules/gateways/seixastec_mercadopago/Validator.php
         - modules/gateways/seixastec_mercadopago/InvoiceAmount.php
         - modules/gateways/seixastec_mercadopago/WebhookSignature.php
